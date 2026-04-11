@@ -205,3 +205,28 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Environment variables — never commit real secrets
+.env
+
+# Runtime data — generated at runtime, not code
+data/twin.db
+data/twin_state.json
+
+# Virtual environment — too large, machine-specific
+venv/
+
+# Three.js local library — too large for repo
+frontend/libs/
+
+# Blender working files
+*.blend
+*.blend1
+
+# OS files
+Thumbs.db
+.DS_Store
+
+# Python cache
+__pycache__/
+*.pyc
