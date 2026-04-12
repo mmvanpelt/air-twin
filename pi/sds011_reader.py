@@ -4,7 +4,7 @@ import time
 import json
 import math
 import logging
-collections import deque
+from collections import deque
 from datetime import datetime, timezone
 import paho.mqtt.client as mqtt
 from paho.mqtt.enums import CallbackAPIVersion
