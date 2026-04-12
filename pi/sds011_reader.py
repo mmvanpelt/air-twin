@@ -4,7 +4,7 @@ import time
 import json
 import math
 import logging
-from collections import deque
+collections import deque
 from datetime import datetime, timezone
 import paho.mqtt.client as mqtt
 from paho.mqtt.enums import CallbackAPIVersion
@@ -16,6 +16,7 @@ BROKER_HOST = "127.0.0.1"
 BROKER_PORT = 1883
 TOPIC_PM25 = "airtwin/sensor/pm25"
 READ_INTERVAL_SEC = 60
+WARMUP_INTERVAL_SEC = 2
 
 WARMUP_READINGS = 15
 ROLLING_WINDOW_SIZE = 30
@@ -221,7 +222,7 @@ def main():
                     continue
 
                 if not warmup.is_warmed_up():
-                    time.sleep(READ_INTERVAL_SEC)
+                    time.sleep(WARMUP_INTERVAL_SEC)
                     continue
 
                 # Flush stale buffer on first real reading
