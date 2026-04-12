@@ -1,0 +1,15 @@
+{
+  "heartbeat_timeout_sec": 30,
+  "missed_heartbeats_before_fallback": 3,
+  "fallback_thresholds": {
+    "fan_speed_1": 5.0,
+    "fan_speed_2": 12.0,
+    "fan_speed_3": 25.0,
+    "fan_speed_4": 50.0,
+    "fan_speed_5": 100.0,
+    "hysteresis": 2.0
+  },
+  "safe_default_fan_speed": 1,
+  "valid_fan_speeds": [1, 2, 3, 4, 5],
+  "valid_modes": ["auto", "manual"]
+}
