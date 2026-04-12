@@ -15,14 +15,13 @@ BAUD_RATE = 9600
 BROKER_HOST = "127.0.0.1"
 BROKER_PORT = 1883
 TOPIC_PM25 = "airtwin/sensor/pm25"
-READ_INTERVAL_SEC = 60
-WARMUP_INTERVAL_SEC = 2
+READ_INTERVAL_SEC = 1
 
 WARMUP_READINGS = 15
-ROLLING_WINDOW_SIZE = 30
+ROLLING_WINDOW_SIZE = 300
 DELTA_MULTIPLIER = 4.0
 Z_SCORE_THRESHOLD = 4.0
-MIN_WINDOW_FILL = 10
+MIN_WINDOW_FILL = 60
 SENSOR_MIN = 0.0
 SENSOR_MAX = 999.9
 ABSOLUTE_FLOOR = 5.0
@@ -34,26 +33,24 @@ logging.basicConfig(
 log = logging.getLogger(__name__)
 
 
-# --- Warmup Filter ---
 class WarmupFilter:
     def __init__(self, warmup_count=WARMUP_READINGS):
         self.warmup_count = warmup_count
         self.count = 0
         self.complete = False
 
-    def is_warmed_up(self):
+    def tick(self):
         if self.complete:
-            return True
+            return False
         self.count += 1
         if self.count <= self.warmup_count:
-            log.info(f"Warmup reading {self.count}/{self.warmup_count} — discarding")
-            return False
+            log.info(f"Warmup reading {self.count}/{self.warmup_count} — tagging, not discarding")
+            return True
         self.complete = True
         log.info("Warmup complete")
-        return True
+        return False
 
 
-# --- Hardware Bounds Check ---
 class HardwareBoundsCheck:
     def check(self, value):
         if value < SENSOR_MIN or value > SENSOR_MAX:
@@ -62,7 +59,6 @@ class HardwareBoundsCheck:
         return True
 
 
-# --- Rolling Window (Welford algorithm) ---
 class RollingWindow:
     def __init__(self, size=ROLLING_WINDOW_SIZE):
         self.size = size
@@ -78,7 +74,6 @@ class RollingWindow:
             delta = old - self.mean
             self.mean -= delta / self.count if self.count > 0 else 0
             self.M2 -= delta * (old - self.mean)
-
         self.window.append(value)
         self.count += 1
         delta = value - self.mean
@@ -97,28 +92,21 @@ class RollingWindow:
         return len(self.window) >= MIN_WINDOW_FILL
 
 
-# --- Plausibility Checker ---
 class PlausibilityChecker:
     def __init__(self, window: RollingWindow):
         self.window = window
 
     def check(self, value):
         if not self.window.filled():
-            if value < ABSOLUTE_FLOOR and value > SENSOR_MIN:
-                log.info(f"Below absolute floor ({value}) — accepted in early window")
             return True, "window_filling"
-
         mean, std = self.window.get_stats()
         delta = value - mean
-
         if std > 0 and delta > DELTA_MULTIPLIER * std:
             log.warning(f"Plausibility fail: {value} µg/m³ delta={delta:.2f} std={std:.2f}")
             return False, "delta_exceeded"
-
         return True, "ok"
 
 
-# --- Trend Calculator ---
 class TrendCalculator:
     def __init__(self, window: RollingWindow):
         self.window = window
@@ -135,9 +123,7 @@ class TrendCalculator:
         return numerator / denominator if denominator != 0 else 0.0
 
 
-# --- SDS011 Reader ---
 def read_sds011(ser):
-    """Read one PM2.5 frame from SDS011. Returns value or None."""
     while True:
         byte = ser.read(1)
         if byte == b'\xaa':
@@ -148,7 +134,6 @@ def read_sds011(ser):
     return None
 
 
-# --- MQTT setup ---
 def create_mqtt_client():
     client = mqtt.Client(CallbackAPIVersion.VERSION2)
 
@@ -179,7 +164,6 @@ def create_mqtt_client():
     return client
 
 
-# --- Serial port with retry ---
 def open_serial(port, baud, retries=10, delay=5):
     for attempt in range(1, retries + 1):
         try:
@@ -192,7 +176,6 @@ def open_serial(port, baud, retries=10, delay=5):
     raise RuntimeError(f"Could not open {port} after {retries} attempts")
 
 
-# --- Main loop ---
 def main():
     log.info("Starting sds011_reader.py")
 
@@ -202,10 +185,12 @@ def main():
     plausibility = PlausibilityChecker(window)
     trend = TrendCalculator(window)
     mqtt_client = create_mqtt_client()
+    last_published_value = None
 
     while True:
         try:
             ser = open_serial(SERIAL_PORT, BAUD_RATE)
+            buffer_flushed = False
             while True:
                 start = time.time()
 
@@ -221,19 +206,45 @@ def main():
                     time.sleep(READ_INTERVAL_SEC)
                     continue
 
-                if not warmup.is_warmed_up():
-                    time.sleep(WARMUP_INTERVAL_SEC)
-                    continue
-
-                # Flush stale buffer on first real reading
-                if warmup.complete and warmup.count == WARMUP_READINGS + 1:
-                    ser.reset_input_buffer()
-                    log.info("Serial buffer flushed — first real reading incoming")
-
+                # Hardware bounds — only hard reject
                 if not bounds.check(value):
                     time.sleep(READ_INTERVAL_SEC)
                     continue
 
+                in_warmup = warmup.tick()
+
+                # Flush stale serial buffer once, immediately after warmup completes
+                if not in_warmup and not buffer_flushed:
+                    ser.reset_input_buffer()
+                    buffer_flushed = True
+                    log.info("Serial buffer flushed — first real reading incoming")
+
+                # Changed flag — has value moved since last publish
+                changed = (last_published_value is None or value != last_published_value)
+                last_published_value = value
+
+                # Warmup readings — publish tagged, do not feed rolling window
+                if in_warmup:
+                    payload = {
+                        "value": value,
+                        "timestamp": datetime.now(timezone.utc).isoformat(),
+                        "is_warmup": True,
+                        "changed": changed,
+                        "is_plausible": None,
+                        "plausibility_reason": "warmup",
+                        "rolling_mean": None,
+                        "rolling_std": None,
+                        "trend_slope": None,
+                        "purifier_on": None,
+                        "fan_speed": None,
+                    }
+                    mqtt_client.publish(TOPIC_PM25, json.dumps(payload))
+                    log.info(f"Published (warmup): {payload}")
+                    elapsed = time.time() - start
+                    time.sleep(max(0, READ_INTERVAL_SEC - elapsed))
+                    continue
+
+                # Operational readings
                 is_plausible, plausibility_reason = plausibility.check(value)
                 rolling_mean, rolling_std = window.get_stats()
                 trend_slope = trend.slope()
@@ -243,6 +254,8 @@ def main():
                 payload = {
                     "value": value,
                     "timestamp": datetime.now(timezone.utc).isoformat(),
+                    "is_warmup": False,
+                    "changed": changed,
                     "is_plausible": is_plausible,
                     "plausibility_reason": plausibility_reason,
                     "rolling_mean": round(rolling_mean, 2),
