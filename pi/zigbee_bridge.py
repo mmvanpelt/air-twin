@@ -57,17 +57,18 @@ def create_client():
             raw = json.loads(msg.payload.decode())
             fields = extract_fields(raw)
  
-            # Publish unified state payload to airtwin/purifier/state
             state_payload = json.dumps({
-                "fan_state":      fields["fan_state"],
-                "fan_speed":      fields["fan_speed"],
-                "fan_mode":       fields["fan_mode"],
-                "filter_age":     fields["filter_age"],      # minutes
-                "device_age":     fields["device_age"],      # minutes
-                "replace_filter": fields["replace_filter"],
-                "pm25_internal":  fields["pm25_internal"],
-                "linkquality":    fields["linkquality"],
-                "air_quality":    fields["air_quality"],
+                "fan_state":       fields["fan_state"],
+                "fan_speed":       fields["fan_speed"],
+                "fan_mode":        fields["fan_mode"],
+                "filter_age":      fields["filter_age"],      # minutes
+                "filter_age_unit": "minutes",
+                "device_age":      fields["device_age"],      # minutes
+                "device_age_unit": "minutes",
+                "replace_filter":  fields["replace_filter"],
+                "pm25_internal":   fields["pm25_internal"],
+                "linkquality":     fields["linkquality"],
+                "air_quality":     fields["air_quality"],
             })
             client.publish("airtwin/purifier/state", state_payload)
             log.info(f"Bridged: fan={fields['fan_state']} speed={fields['fan_speed']} "
@@ -106,4 +107,3 @@ def main():
  
 if __name__ == "__main__":
     main()
- 
