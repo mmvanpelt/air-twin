@@ -28,7 +28,29 @@
   },
   "spikes": {
     "resolution_window_minutes": 20,
-    "_spike_comment": "If a spike resolves within this window, it is logged as a spike event and regime stays baseline. If not resolved, escalates to degraded regime consideration."
+    "_spike_comment": "If a spike resolves within this window, it is logged as a spike event and regime stays baseline. If not resolved, escalates to degraded regime consideration.",
+    "_policy_comment": "Twin observes purifier auto response before intervening. Intervention threshold is learned from empirical spike observations, not fixed. Fixed values are cold-start priors only.",
+    "observation_window_minutes": 3,
+    "_obs_comment": "How long twin observes purifier auto response before evaluating whether to intervene. Gives auto mode time to demonstrate adequate decay. Twin does not command during this window.",
+    "min_spike_observations_to_learn": 10,
+    "_learn_comment": "Minimum spike episodes observed before learned threshold supersedes cold-start prior. During Phase A (< min observations) twin observes only. Phase B (>= min) enables evidence-based intervention.",
+    "intervention_performance_threshold_prior": 0.6,
+    "_prior_comment": "Cold-start intervention threshold \u2014 used only until min_spike_observations_to_learn is reached. If observed decay rate during spike is below this fraction of expected, auto mode is deemed inadequate. Replaced by learned threshold once sufficient data exists.",
+    "spike_response_model": {
+      "_comment": "Learned model of purifier adequate auto response. Built from empirical spike observations. Twin learns what adequate performance looks like per auto step and spike magnitude bracket. Intervention threshold derived from this model.",
+      "magnitude_brackets_ug_m3": [
+        5,
+        15,
+        30,
+        50,
+        100
+      ],
+      "_brackets_comment": "Spike magnitude brackets in \u00b5g/m\u00b3 above baseline. Twin tracks adequate response separately per bracket \u2014 a small spike requires different intervention logic than a large one.",
+      "learned_adequate_performance_ratio": {},
+      "_ratio_comment": "Learned adequate performance ratio per auto step and magnitude bracket. Keyed by str(auto_step):str(bracket_index). Populated by twin engine as spike observations accumulate. Empty until min_spike_observations_to_learn reached.",
+      "intervention_enabled": false,
+      "_intervention_comment": "Set to true automatically by twin engine when min_spike_observations_to_learn reached. Never set manually \u2014 twin earns intervention rights through observation."
+    }
   },
   "confidence": {
     "smoothing_alpha": 0.05,
@@ -70,7 +92,11 @@
     "escalation_awareness_minutes": 60,
     "purifier_off_requires_permission": true,
     "override_auto_mode_requires_permission": false,
-    "_auto_mode_comment": "Twin engine switches purifier from auto to manual before commanding speed, restores auto when done. Logged but does not require explicit permission."
+    "_auto_mode_comment": "Twin engine switches purifier from auto to manual before commanding speed, restores auto when done. Logged but does not require explicit permission.",
+    "degraded_command_speed": 4,
+    "_degraded_speed_comment": "Fan speed commanded when twin intervenes during DEGRADED regime. Tunable without code changes.",
+    "restore_auto_on_resolution": true,
+    "_restore_comment": "When true, twin restores purifier to auto mode after every twin-commanded episode resolves. Auto mode is the default intelligence layer \u2014 twin supervises, not replaces."
   },
   "paths": {
     "device_profiles": "assets/device_profiles.json",

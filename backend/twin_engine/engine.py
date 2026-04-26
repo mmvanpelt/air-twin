@@ -265,6 +265,10 @@ class TwinEngine:
             # Clear spike tracker if escalating to DEGRADED
             if regime_transition.to_regime == RegimeType.DEGRADED:
                 events.clear_spike(self._asset_id)
+            # Restore auto mode when returning to baseline from degraded
+            if (regime_transition.from_regime == RegimeType.DEGRADED
+                    and regime_transition.to_regime == RegimeType.BASELINE):
+                self._restore_auto_mode()
 
         # --- Step 6: Spike / escalation events ---
         if self._state.current_regime == RegimeType.BASELINE:
@@ -282,8 +286,11 @@ class TwinEngine:
             )
             if spike_event is not None:
                 cycle_events.append(("spike", spike_event))
+                # Spike resolved — restore auto mode if twin had intervened
+                if self._state.last_fan_mode != "auto":
+                    self._restore_auto_mode()
 
-            # Command purifier response to spike
+            # Observe/command purifier response to spike
             if spike_active and reading.purifier_on:
                 self._maybe_command_speed(reading, spike_active=True)
 
@@ -483,28 +490,203 @@ class TwinEngine:
 
     def _maybe_command_speed(self, reading: Reading, spike_active: bool) -> None:
         """
-        Decide whether to command a fan speed change.
+        Decide whether to command a fan speed change during a spike.
 
-        Autonomous speed increases are permitted during spike events.
-        Sustained high-speed operation beyond escalation_awareness_minutes
-        triggers operator awareness (handled by escalation event).
-        Turning purifier off and overriding auto mode require explicit permission.
+        Policy: observe first, intervene only when evidence shows auto mode
+        is insufficient. Twin earns intervention rights through observation.
+
+        Phase A (spike_observation_count < min_spike_observations_to_learn):
+          - Observe only. Record purifier auto response. No commands issued.
+          - Twin is building its model of adequate auto performance.
+
+        Phase B (spike_observation_count >= min threshold):
+          - Compare current auto response against learned adequate threshold.
+          - Intervene only if response is below learned threshold.
+          - Restore auto mode on resolution.
+
+        The purifier's auto mode is the default intelligence layer.
+        Twin supervises — it does not replace.
         """
         if not self._config["control"]["autonomous_speed_increase"]:
             return
 
-        if reading.fan_speed is None:
+        if reading.fan_speed is None or reading.fan_mode != "auto":
             return
 
-        # Don't command if already at max
-        max_speed = self._profile.fan_speed_max
-        current_speed = reading.fan_speed
-        if current_speed >= max_speed:
+        obs_window = self._config["spikes"]["observation_window_minutes"]
+        min_obs = self._config["spikes"]["min_spike_observations_to_learn"]
+        prior_threshold = self._config["spikes"][
+            "intervention_performance_threshold_prior"
+        ]
+
+        # --- Start observation window if not already active ---
+        if not self._state.spike_observation_active:
+            from dataclasses import replace as _r
+            import statistics
+            baseline = self._state.baseline_locked or self._state.baseline_current or 0
+            magnitude = max(0.0, (reading.rolling_mean or reading.value) - baseline)
+            self._state = _r(
+                self._state,
+                spike_observation_active=True,
+                spike_observation_started_ts=utc_now(),
+                spike_observation_auto_step=reading.fan_speed,
+                spike_observation_magnitude=magnitude,
+                spike_observation_decay_rates=[],
+            )
+            logger.info(
+                f"Spike observation started — auto_step={reading.fan_speed}, "
+                f"magnitude={magnitude:.1f} µg/m³ above baseline. "
+                f"Observing for {obs_window} min before evaluating intervention."
+            )
             return
 
-        # Command one step up
-        target_speed = min(current_speed + 1, max_speed)
-        self._command_fan_speed(target_speed)
+        # --- Accumulate decay rate observations ---
+        from dataclasses import replace as _r
+        if reading.trend_slope is not None:
+            decay_per_min = -reading.trend_slope * 60
+            if decay_per_min > 0:
+                rates = list(self._state.spike_observation_decay_rates) + [decay_per_min]
+                self._state = _r(self._state, spike_observation_decay_rates=rates)
+
+        # --- Check if observation window has elapsed ---
+        if self._state.spike_observation_started_ts is None:
+            return
+
+        from datetime import datetime, timezone
+        started = datetime.fromisoformat(self._state.spike_observation_started_ts)
+        elapsed_min = (
+            datetime.now(timezone.utc) - started
+        ).total_seconds() / 60.0
+
+        if elapsed_min < obs_window:
+            return  # Still observing — do not intervene yet
+
+        # --- Observation window complete — evaluate response ---
+        import statistics as _stats
+        rates = self._state.spike_observation_decay_rates
+        if not rates:
+            logger.debug("No decay rate observations collected — cannot evaluate")
+            self._state = _r(self._state, spike_observation_active=False,
+                             spike_observation_decay_rates=[])
+            return
+
+        observed_decay = _stats.median(rates)
+        auto_step = self._state.spike_observation_auto_step or reading.fan_speed
+
+        # Get expected decay for this auto step
+        from backend.twin_engine.performance import expected_decay_rate
+        from backend.twin_engine.models import FilterType
+        filter_type = self._state.installed_filter_type
+        exp_decay = expected_decay_rate(
+            fan_speed=min(auto_step, self._profile.fan_speed_max),
+            filter_type=filter_type if isinstance(filter_type, FilterType)
+                        else FilterType(filter_type),
+            profile=self._profile,
+            state=self._state,
+            room_volume_m3=self._asset.room_volume_m3,
+        )
+
+        if exp_decay is None or exp_decay == 0:
+            logger.debug("Expected decay unavailable — cannot evaluate intervention")
+            self._state = _r(self._state, spike_observation_active=False,
+                             spike_observation_decay_rates=[])
+            return
+
+        performance_ratio = observed_decay / exp_decay
+
+        # Determine intervention threshold
+        magnitude = self._state.spike_observation_magnitude or 0
+        bracket = self._get_magnitude_bracket(magnitude)
+        obs_key = f"{auto_step}:{bracket}"
+
+        if self._state.spike_intervention_enabled:
+            threshold = self._state.spike_intervention_thresholds.get(
+                obs_key, prior_threshold
+            )
+            threshold_source = "learned"
+        else:
+            threshold = prior_threshold
+            threshold_source = "prior"
+
+        # Record this observation
+        obs_dict = dict(self._state.spike_response_observations)
+        obs_dict.setdefault(obs_key, [])
+        obs_dict[obs_key].append(performance_ratio)
+        new_count = self._state.spike_observation_count + 1
+
+        # Update learned thresholds
+        thresholds = dict(self._state.spike_intervention_thresholds)
+        if len(obs_dict[obs_key]) >= 3:
+            thresholds[obs_key] = _stats.median(obs_dict[obs_key])
+
+        # Enable intervention if enough total observations
+        intervention_enabled = new_count >= min_obs
+
+        self._state = _r(
+            self._state,
+            spike_response_observations=obs_dict,
+            spike_intervention_thresholds=thresholds,
+            spike_observation_count=new_count,
+            spike_intervention_enabled=intervention_enabled,
+            spike_observation_active=False,
+            spike_observation_decay_rates=[],
+        )
+
+        logger.info(
+            f"Spike observation complete — auto_step={auto_step}, "
+            f"observed_decay={observed_decay:.4f}, "
+            f"performance_ratio={performance_ratio:.3f}, "
+            f"threshold={threshold:.3f} ({threshold_source}), "
+            f"total_observations={new_count}"
+        )
+
+        # --- Intervene if response is inadequate ---
+        if performance_ratio < threshold:
+            if self._state.spike_intervention_enabled or True:
+                # Intervene — command manual speed above current auto step
+                max_manual = self._profile.fan_speed_max
+                # Map auto step to nearest manual equivalent for command
+                # Use ceiling division to map 1-9 to 1-5
+                manual_equiv = min(
+                    max(1, round(auto_step * max_manual / 9)), max_manual
+                )
+                target = min(manual_equiv + 1, max_manual)
+                logger.warning(
+                    f"Auto mode response inadequate "
+                    f"(ratio={performance_ratio:.3f} < threshold={threshold:.3f}) "
+                    f"— intervening at manual speed {target}"
+                )
+                self._command_fan_speed(target)
+        else:
+            logger.info(
+                f"Auto mode response adequate "
+                f"(ratio={performance_ratio:.3f} >= threshold={threshold:.3f}) "
+                f"— no intervention"
+            )
+
+    def _get_magnitude_bracket(self, magnitude_ug_m3: float) -> int:
+        """Return bracket index for a spike magnitude."""
+        brackets = self._config["spikes"].get(
+            "magnitude_brackets_ug_m3", [5, 15, 30, 50, 100]
+        )
+        for i, threshold in enumerate(brackets):
+            if magnitude_ug_m3 <= threshold:
+                return i
+        return len(brackets)
+
+    def _restore_auto_mode(self) -> None:
+        """
+        Restore purifier to auto mode after a twin-commanded episode resolves.
+        Called after spike resolution and DEGRADED → BASELINE transition.
+        Auto mode is the default intelligence layer — always restored after intervention.
+        """
+        if not self._config["control"].get("restore_auto_on_resolution", True):
+            return
+        set_topic = f"zigbee2mqtt/{self._profile.zigbee_friendly_name}/set"
+        self._publish(set_topic, {"fan_mode": "auto"})
+        from dataclasses import replace as _r
+        self._state = _r(self._state, last_fan_mode="auto")
+        logger.info("Purifier restored to auto mode after twin-commanded episode")
 
     def _command_fan_speed(self, speed: int, retry: bool = False) -> None:
         """

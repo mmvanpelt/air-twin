@@ -233,6 +233,34 @@ class TwinState:
     last_command_ts:            Optional[str] = None
     last_command_acknowledged:  Optional[bool] = None
 
+    # --- Spike response model ---
+    # Learned model of adequate purifier auto response per spike magnitude bracket.
+    # Keyed by "auto_step:bracket_index" → list of observed performance ratios.
+    # Twin observes Phase A until min_spike_observations_to_learn reached,
+    # then derives intervention threshold from this data in Phase B.
+    spike_response_observations:    dict = field(default_factory=dict)
+    # { "6:1": [0.82, 0.79, 0.85, ...], "7:2": [0.91, ...] }
+
+    # Derived learned thresholds — median of observations per key.
+    # None until sufficient observations exist per key.
+    spike_intervention_thresholds:  dict = field(default_factory=dict)
+    # { "6:1": 0.82, "7:2": 0.91 }
+
+    # Total spike observations logged (across all brackets/steps)
+    spike_observation_count:        int = 0
+
+    # Whether twin has earned intervention rights
+    # Set True automatically when spike_observation_count >= min threshold
+    spike_intervention_enabled:     bool = False
+
+    # Current spike observation in progress
+    # Tracks decay rate measurements during active observation window
+    spike_observation_active:       bool = False
+    spike_observation_started_ts:   Optional[str] = None
+    spike_observation_auto_step:    Optional[int] = None
+    spike_observation_magnitude:    Optional[float] = None
+    spike_observation_decay_rates:  list = field(default_factory=list)
+
     # --- Readings ---
     last_reading_ts:            Optional[str] = None
     last_reading_value:         Optional[float] = None
@@ -282,6 +310,16 @@ class TwinState:
             "last_fan_mode":              self.last_fan_mode,
             "last_command_ts":            self.last_command_ts,
             "last_command_acknowledged":  self.last_command_acknowledged,
+            # Spike response model
+            "spike_response_observations":   self.spike_response_observations,
+            "spike_intervention_thresholds": self.spike_intervention_thresholds,
+            "spike_observation_count":       self.spike_observation_count,
+            "spike_intervention_enabled":    self.spike_intervention_enabled,
+            "spike_observation_active":      self.spike_observation_active,
+            "spike_observation_started_ts":  self.spike_observation_started_ts,
+            "spike_observation_auto_step":   self.spike_observation_auto_step,
+            "spike_observation_magnitude":   self.spike_observation_magnitude,
+            "spike_observation_decay_rates": self.spike_observation_decay_rates,
             # Readings
             "last_reading_ts":            self.last_reading_ts,
             "last_reading_value":         self.last_reading_value,
@@ -353,6 +391,16 @@ class TwinState:
             last_fan_mode=get("last_fan_mode"),
             last_command_ts=get("last_command_ts"),
             last_command_acknowledged=get("last_command_acknowledged"),
+            # Spike response model
+            spike_response_observations=get("spike_response_observations", {}),
+            spike_intervention_thresholds=get("spike_intervention_thresholds", {}),
+            spike_observation_count=get("spike_observation_count", 0),
+            spike_intervention_enabled=get("spike_intervention_enabled", False),
+            spike_observation_active=get("spike_observation_active", False),
+            spike_observation_started_ts=get("spike_observation_started_ts"),
+            spike_observation_auto_step=get("spike_observation_auto_step"),
+            spike_observation_magnitude=get("spike_observation_magnitude"),
+            spike_observation_decay_rates=get("spike_observation_decay_rates", []),
             # Readings
             last_reading_ts=get("last_reading_ts"),
             last_reading_value=get("last_reading_value"),
