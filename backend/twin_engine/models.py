@@ -230,6 +230,124 @@ class TwinState:
     # --- Commissioning ---
     commissioned_at:            Optional[str] = None   # UTC ISO8601 — first valid reading
 
+    def to_dict(self) -> dict:
+        """
+        Serialise TwinState to a JSON-safe dict.
+        Converts enums to their string values. All other types are
+        already JSON-safe (float, int, str, bool, None, dict).
+        Called by engine.py before writing twin_state.json.
+        """
+        return {
+            # Regime
+            "current_regime":             self.current_regime.value,
+            "regime_entered_ts":          self.regime_entered_ts,
+            "regime_duration_minutes":    self.regime_duration_minutes,
+            # Confidence
+            "confidence":                 self.confidence,
+            "confidence_factors":         self.confidence_factors,
+            # Baseline
+            "baseline_locked":            self.baseline_locked,
+            "baseline_locked_ts":         self.baseline_locked_ts,
+            "baseline_locked_month":      self.baseline_locked_month,
+            "baseline_locked_season":     self.baseline_locked_season.value
+                                          if self.baseline_locked_season else None,
+            "baseline_current":           self.baseline_current,
+            "baseline_std":               self.baseline_std,
+            "baseline_learn_readings":    self.baseline_learn_readings,
+            "baseline_learn_started_ts":  self.baseline_learn_started_ts,
+            # Filter
+            "filter_change_device_age_anchor": self.filter_change_device_age_anchor,
+            "filter_change_pending_reset":     self.filter_change_pending_reset,
+            "last_known_filter_age":           self.last_known_filter_age,
+            "installed_filter_type":           self.installed_filter_type.value,
+            "last_logged_filter_type":         self.last_logged_filter_type.value
+                                               if self.last_logged_filter_type else None,
+            # Performance
+            "room_efficiency_factor":          self.room_efficiency_factor,
+            "empirical_cadr_m3h":              self.empirical_cadr_m3h,
+            "performance_observation_counts":  self.performance_observation_counts,
+            # Control
+            "last_fan_speed_commanded":   self.last_fan_speed_commanded,
+            "last_fan_mode":              self.last_fan_mode,
+            "last_command_ts":            self.last_command_ts,
+            "last_command_acknowledged":  self.last_command_acknowledged,
+            # Readings
+            "last_reading_ts":            self.last_reading_ts,
+            "last_reading_value":         self.last_reading_value,
+            # Commissioning
+            "commissioned_at":            self.commissioned_at,
+        }
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "TwinState":
+        """
+        Deserialise TwinState from a JSON dict loaded from twin_state.json.
+        Converts string values back to enums. Missing keys fall back to
+        field defaults — allows safe loading of older state files when new
+        fields are added.
+        Called by engine.py on startup.
+        """
+        def get(key, default=None):
+            return d.get(key, default)
+
+        # Parse optional enums safely
+        season_raw = get("baseline_locked_season")
+        season = Season(season_raw) if season_raw else None
+
+        filter_type_raw = get("installed_filter_type", FilterType.PARTICLE_ONLY.value)
+        try:
+            installed_filter_type = FilterType(filter_type_raw)
+        except ValueError:
+            installed_filter_type = FilterType.PARTICLE_ONLY
+
+        last_filter_raw = get("last_logged_filter_type")
+        last_logged_filter_type = FilterType(last_filter_raw) if last_filter_raw else None
+
+        regime_raw = get("current_regime", RegimeType.INITIALISING.value)
+        try:
+            current_regime = RegimeType(regime_raw)
+        except ValueError:
+            current_regime = RegimeType.INITIALISING
+
+        return cls(
+            # Regime
+            current_regime=current_regime,
+            regime_entered_ts=get("regime_entered_ts"),
+            regime_duration_minutes=get("regime_duration_minutes", 0.0),
+            # Confidence
+            confidence=get("confidence", 0.5),
+            confidence_factors=get("confidence_factors", {}),
+            # Baseline
+            baseline_locked=get("baseline_locked"),
+            baseline_locked_ts=get("baseline_locked_ts"),
+            baseline_locked_month=get("baseline_locked_month"),
+            baseline_locked_season=season,
+            baseline_current=get("baseline_current"),
+            baseline_std=get("baseline_std"),
+            baseline_learn_readings=get("baseline_learn_readings", 0),
+            baseline_learn_started_ts=get("baseline_learn_started_ts"),
+            # Filter
+            filter_change_device_age_anchor=get("filter_change_device_age_anchor"),
+            filter_change_pending_reset=get("filter_change_pending_reset", False),
+            last_known_filter_age=get("last_known_filter_age"),
+            installed_filter_type=installed_filter_type,
+            last_logged_filter_type=last_logged_filter_type,
+            # Performance
+            room_efficiency_factor=get("room_efficiency_factor", 1.0),
+            empirical_cadr_m3h=get("empirical_cadr_m3h", {}),
+            performance_observation_counts=get("performance_observation_counts", {}),
+            # Control
+            last_fan_speed_commanded=get("last_fan_speed_commanded"),
+            last_fan_mode=get("last_fan_mode"),
+            last_command_ts=get("last_command_ts"),
+            last_command_acknowledged=get("last_command_acknowledged"),
+            # Readings
+            last_reading_ts=get("last_reading_ts"),
+            last_reading_value=get("last_reading_value"),
+            # Commissioning
+            commissioned_at=get("commissioned_at"),
+        )
+
 
 # ---------------------------------------------------------------------------
 # Device profile and asset — loader output types
