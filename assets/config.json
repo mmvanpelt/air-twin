@@ -1,0 +1,92 @@
+{
+  "_comment": "Runtime configuration for Air Twin. Environment-specific and operational parameters live here. Device-specific facts live in device_profiles.json. Asset-specific facts live in asset_registry.json.",
+
+  "room": {
+    "volume_m3": 69.6,
+    "shape": "L-shaped",
+    "_volume_comment": "Derived from physical measurements. Wide section: 10'6\" x 15'9\" x 8'H = 37.48 m3. Narrow section: 13'6\" x 10'6\" x 8'H = 32.09 m3. Total: 69.57 m3, rounded to 69.6 m3. To be validated against Polycam 3D scan mesh volume when Blender pipeline is complete.",
+    "_shape_comment": "L-shaped room. Well-mixed room assumption applies with reduced accuracy relative to a rectangular room of equal volume. Room efficiency factor in twin_state.json absorbs geometric inefficiency empirically."
+  },
+
+  "baseline": {
+    "min_readings_to_lock": 900,
+    "_min_readings_comment": "15 consecutive minutes at 1Hz = 900 readings. All must have plausibility_reason == ok before baseline lock is attempted.",
+    "lock_variance_threshold_std": 2.0,
+    "_variance_comment": "Rolling std must remain below this value (ug/m3) during the learn window for the window to qualify as stable.",
+    "baseline_ema_alpha": 0.01,
+    "_ema_comment": "Exponential moving average learning rate for baseline_current. Slow — baseline_current is trend context only, not used for regime decisions.",
+    "rate_of_change_guard_ug_m3_per_hour": 5.0,
+    "_roc_comment": "If baseline_current rises faster than this rate sustained over the guard window, confidence takes a larger negative hit. Guards against gradual baseline drift being silently absorbed."
+  },
+
+  "regimes": {
+    "gap_threshold_s": 300,
+    "_gap_comment": "If no readings arrive for longer than this, twin enters unknown regime on next reading. Does not resume baseline from stale state.",
+    "degraded_entry_std_multiplier": 3.0,
+    "_degraded_entry_comment": "Rolling mean must exceed baseline_locked + (N * baseline_std) to trigger degraded regime consideration.",
+    "degraded_entry_duration_minutes": 10,
+    "_degraded_duration_comment": "Exceedance must be sustained for this many consecutive minutes before regime transitions to degraded.",
+    "degraded_exit_duration_minutes": 15,
+    "_degraded_exit_comment": "Must return to baseline range for this many consecutive minutes before regime transitions back to baseline."
+  },
+
+  "spikes": {
+    "resolution_window_minutes": 20,
+    "_spike_comment": "If a spike resolves within this window, it is logged as a spike event and regime stays baseline. If not resolved, escalates to degraded regime consideration."
+  },
+
+  "confidence": {
+    "smoothing_alpha": 0.05,
+    "_smoothing_comment": "Exponential smoothing learning rate for confidence score. Small — confidence changes should be evidence-driven and gradual, not reactive to single readings.",
+
+    "evidence_weights": {
+      "_comment": "Signed evidence deltas applied per reading cycle. Positive increases confidence, negative decreases. Magnitudes are relative — tune based on observed behaviour.",
+      "plausibility_ok": 0.002,
+      "sensor_cross_reference_agree": 0.002,
+      "rolling_std_low": 0.001,
+      "readings_on_schedule": 0.001,
+      "baseline_divergence_sustained": -0.010,
+      "sensor_cross_reference_disagree": -0.008,
+      "sustained_implausible_readings": -0.015,
+      "reading_gap_per_minute": -0.005,
+      "seasonal_mismatch": -0.002,
+      "roc_guard_breach": -0.012,
+      "performance_ratio_below_threshold": -0.008,
+      "filter_age_divergence": -0.006
+    },
+
+    "sensor_cross_reference_threshold_ug_m3": 15.0,
+    "_cross_ref_comment": "SDS011 and pm25_internal agree if within this value. Disagreement beyond this threshold triggers negative confidence evidence. IKEA internal sensor is lower quality — threshold is intentionally generous."
+  },
+
+  "filter": {
+    "unlogged_change_detection_threshold_minutes": 60,
+    "_unlogged_comment": "If filter_age drops by more than this between consecutive readings, an unlogged filter change is suspected. Discriminated from communication fault using device_age continuity and performance ratio."
+  },
+
+  "performance": {
+    "ratio_degradation_threshold": 0.70,
+    "_perf_comment": "Mirrors device_profiles.json. Performance ratio below this value triggers diagnostic decision tree. Kept here so it can be tuned per deployment without touching the device profile.",
+    "min_event_duration_minutes": 5,
+    "_event_comment": "Minimum purifier response event duration before trend_slope is considered reliable enough to log as a performance_observation."
+  },
+
+  "control": {
+    "heartbeat_interval_s": 10,
+    "_heartbeat_comment": "Windows twin engine publishes heartbeat to Pi at this interval. Pi local fallback activates if heartbeat is absent beyond heartbeat_timeout_s.",
+    "heartbeat_timeout_s": 30,
+    "autonomous_speed_increase": true,
+    "_autonomous_comment": "Twin engine may autonomously increase fan speed during spike events. Sustained high-speed operation beyond escalation_awareness_minutes triggers operator awareness event.",
+    "escalation_awareness_minutes": 60,
+    "purifier_off_requires_permission": true,
+    "override_auto_mode_requires_permission": false,
+    "_auto_mode_comment": "Twin engine switches purifier from auto to manual before commanding speed, restores auto when done. Logged but does not require explicit permission."
+  },
+
+  "paths": {
+    "device_profiles": "assets/device_profiles.json",
+    "asset_registry": "data/asset_registry.json",
+    "twin_state": "data/twin_state.json",
+    "database": "data/airtwin.db"
+  }
+}

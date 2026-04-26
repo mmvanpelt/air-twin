@@ -1,0 +1,123 @@
+{
+  "_comment": "Device profiles for Air Twin. All device-specific facts live here. The twin engine reads from this at runtime — no device knowledge is baked into engine logic. Room-specific values (volume, efficiency factor) live in config.json and asset_registry.json.",
+
+  "devices": {
+    "ikea_starkvind_e2007": {
+      "_comment": "IKEA STARKVIND Air Purifier E2007. SKU 004.619.49 (standalone unit, particle filter included, gas filter optional/sold separately).",
+
+      "manufacturer": "IKEA of Sweden AB",
+      "model": "STARKVIND Air Purifier",
+      "type": "E2007",
+      "sku": "004.619.49",
+      "zigbee_friendly_name": "starkvind",
+
+      "fan_speeds": {
+        "min": 1,
+        "max": 5,
+        "valid": [1, 2, 3, 4, 5]
+      },
+
+      "cadr": {
+        "_comment": "Clean Air Delivery Rate in m3/h per fan speed, per filter configuration. Speeds 1 and 5 are IKEA/AHAM published values. Speeds 2-4 are not published by IKEA — see interpolation_policy. Source: IKEA product page for SKU 004.619.49 and regional IKEA sites (SE) which publish in m3/h natively.",
+
+        "interpolation_policy": "power_law",
+        "_interpolation_comment": "Power-law interpolation anchored to published endpoints. Fan motor airflow scales approximately with RPM; power scales with RPM^3. Linear interpolation is not physically correct for this device class. Twin engine applies lower confidence to commanded speeds 2-4 until empirical observations are available to replace interpolated priors. Empirical values for speeds 2-4 accumulate in twin_state.json and supersede these interpolated values once evidence threshold is met. Published anchor values for speeds 1 and 5 are never superseded by empirical observations — consistent field deviation from anchors is interpreted as a room efficiency factor, not a device CADR correction.",
+
+        "particle_filter_only": {
+          "_comment": "Particle filter installed, no gas filter. This is the factory default configuration for SKU 004.619.49.",
+          "1": { "value": 50.0, "source": "manufacturer", "source_detail": "IKEA published — AHAM certified" },
+          "2": { "value": null, "source": "interpolated", "source_detail": "Not published by IKEA. Twin engine interpolates using power_law policy between speeds 1 and 5." },
+          "3": { "value": null, "source": "interpolated", "source_detail": "Not published by IKEA. Twin engine interpolates using power_law policy between speeds 1 and 5." },
+          "4": { "value": null, "source": "interpolated", "source_detail": "Not published by IKEA. Twin engine interpolates using power_law policy between speeds 1 and 5." },
+          "5": { "value": 260.0, "source": "manufacturer", "source_detail": "IKEA published — AHAM certified" }
+        },
+
+        "particle_and_gas_filter": {
+          "_comment": "Both particle and gas filter installed. Gas filter adds restriction, reducing CADR. Filter for gas cleaning sold separately (IKEA STARKVIND Filter for gas cleaning).",
+          "1": { "value": 45.0, "source": "manufacturer", "source_detail": "IKEA published — AHAM certified" },
+          "2": { "value": null, "source": "interpolated", "source_detail": "Not published by IKEA. Twin engine interpolates using power_law policy between speeds 1 and 5." },
+          "3": { "value": null, "source": "interpolated", "source_detail": "Not published by IKEA. Twin engine interpolates using power_law policy between speeds 1 and 5." },
+          "4": { "value": null, "source": "interpolated", "source_detail": "Not published by IKEA. Twin engine interpolates using power_law policy between speeds 1 and 5." },
+          "5": { "value": 240.0, "source": "manufacturer", "source_detail": "IKEA published — AHAM certified" }
+        }
+      },
+
+      "noise_db": {
+        "_comment": "Noise level in dB per filter configuration. Published by IKEA for speeds 1 and 5 only. Informational — not used in twin engine calculations.",
+        "particle_filter_only": {
+          "1": { "value": 24, "source": "manufacturer" },
+          "5": { "value": 53, "source": "manufacturer" }
+        },
+        "particle_and_gas_filter": {
+          "1": { "value": 24, "source": "manufacturer" },
+          "5": { "value": 51, "source": "manufacturer" }
+        }
+      },
+
+      "power_consumption_w": {
+        "_comment": "Power consumption in Watts per filter configuration. Published by IKEA for speeds 1 and 5 only. Power scales approximately with RPM^3 — intermediate values can be estimated from smart plug measurement at each fan speed and used to empirically anchor intermediate CADR estimates before sufficient particle decay observations exist.",
+        "particle_filter_only": {
+          "1": { "value": 2.0, "source": "manufacturer" },
+          "5": { "value": 33.0, "source": "manufacturer" }
+        },
+        "particle_and_gas_filter": {
+          "1": { "value": 1.9, "source": "manufacturer" },
+          "5": { "value": 25.0, "source": "manufacturer" }
+        }
+      },
+
+      "filter_types": {
+        "particle_only": {
+          "label": "Particle filter only",
+          "description": "Factory default. Filters PM2.5, dust, pollen. Rated 99.5% efficiency for particles 0.1-2.5 micrometers.",
+          "filter_life_hours": 4380,
+          "_filter_life_comment": "IKEA recommends replacement within 6 months. 6 months * 730 hours/month = 4380 hours. This is a manufacturer time-based heuristic, not a performance-based threshold. Twin engine performance ratio is a more reliable degradation signal and takes precedence. filter_life_hours is used as a soft reference only.",
+          "filter_life_source": "manufacturer",
+          "cadr_profile": "particle_filter_only"
+        },
+        "particle_and_gas": {
+          "label": "Particle and gas filter",
+          "description": "Particle filter plus optional gas filter installed. Additionally filters formaldehyde, VOCs, cooking odours, smoke odours.",
+          "filter_life_hours": 4380,
+          "_filter_life_comment": "Same manufacturer 6-month recommendation applies to both filter types. Gas filter replacement interval may differ in high-VOC environments — not separately specified by IKEA.",
+          "filter_life_source": "manufacturer",
+          "cadr_profile": "particle_and_gas_filter"
+        }
+      },
+
+      "default_filter_type": "particle_only",
+      "_default_filter_comment": "SKU 004.619.49 ships with particle filter only. Twin uses this as the default until a filter change is logged via QR maintenance event.",
+
+      "performance_model": {
+        "_comment": "Parameters governing how the twin engine models and evaluates purifier performance.",
+
+        "expected_decay_rate_formula": "cadr_m3h[fan_speed][filter_type] * room_efficiency_factor / room_volume_m3",
+        "_formula_comment": "Expected decay rate in m3/h/m3 = volumes per hour. room_efficiency_factor starts at 1.0 and is updated by the twin engine from performance_observations. It lives in twin_state.json, not here. Consistent field deviation from manufacturer CADR anchors is absorbed into room_efficiency_factor, not into the device profile.",
+
+        "performance_ratio_degradation_threshold": 0.70,
+        "_perf_ratio_comment": "Performance ratio below this value triggers performance degradation diagnostic. Ratio = observed_decay / expected_decay. 1.0 = performing to spec. Values below 0.70 warrant investigation.",
+
+        "empirical_cadr_min_observations": 10,
+        "_empirical_comment": "Minimum number of performance_observations events required before empirical CADR estimates for speeds 2-4 are promoted over interpolated priors in twin_state.json.",
+
+        "clogged_filter_physics": "fixed_rpm",
+        "_physics_comment": "Starkvind uses fixed fan speed steps. Motor runs at fixed RPM and does NOT compensate for filter restriction. Clogged filter degrades performance ratio proportionally across all fan speeds. Severe late-stage clog may cause high speeds to fail first (motor stall / thermal protection) while low speeds still function. Gradual onset correlating with twin_filter_age is the expected signature."
+      },
+
+      "control": {
+        "zigbee_set_topic": "zigbee2mqtt/starkvind/set",
+        "valid_fan_speeds": [1, 2, 3, 4, 5],
+        "valid_fan_modes": ["auto", "manual"],
+        "command_acknowledgement_timeout_s": 10,
+        "_ack_comment": "Twin engine sends command, waits this many seconds, verifies reported state changed. Retries once. Flags unresponsive if no confirmation after retry."
+      },
+
+      "physical": {
+        "dimensions_cm": { "W": 51, "H": 53, "D": 19 },
+        "weight_kg": 5.9,
+        "max_coverage_m2": 20,
+        "_coverage_comment": "IKEA states up to 215 sq ft (approx 20 m2) depending on fan speed. This is a marketing figure based on the well-mixed room model. Twin engine uses CADR / room_volume for actual performance modelling."
+      }
+    }
+  }
+}

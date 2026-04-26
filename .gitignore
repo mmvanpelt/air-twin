@@ -229,6 +229,7 @@ Thumbs.db
 
 # Python cache
 __pycache__/
-*.pycdata/airtwin.db
-
+*.pyc
 data/airtwin.db
+data/airtwin.db-shm
+data/airtwin.db-wal

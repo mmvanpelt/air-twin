@@ -1,0 +1,44 @@
+{
+  "_comment": "Asset registry for Air Twin. Links physical device instances to their device profiles. One entry per physical device deployed. Room geometry and placement context live here — these are asset-specific facts, not device-specific facts.",
+
+  "assets": {
+    "starkvind_01": {
+      "_comment": "Single IKEA Starkvind E2007 instance. Primary air purifier for the L-shaped room.",
+
+      "device_profile": "ikea_starkvind_e2007",
+      "sku": "004.619.49",
+      "zigbee_ieee": "0xc02cedfffe2bc48a",
+      "zigbee_friendly_name": "starkvind",
+      "zigbee_linkquality_at_pairing": 255,
+
+      "room": {
+        "shape": "L-shaped",
+        "volume_m3": 69.6,
+        "_volume_comment": "Derived from physical measurements. To be validated against Polycam mesh. See config.json for breakdown."
+      },
+
+      "placement": {
+        "section": "narrow",
+        "_section_comment": "Narrow leg of L-shaped room. Dimensions 13'6\" x 10'6\" (4.11m x 3.20m).",
+        "position_m": null,
+        "_position_comment": "World-space coordinates to be populated from Blender scene at export time. Purifier object origin in the scene is the authoritative position. Do not enter manually — derive from geometry pipeline. Approximate physical location: ~4ft from one short wall of narrow section, ~7ft from junction wall.",
+        "blender_object_name": "purifier",
+        "position_source": "pending_blender_export"
+      },
+
+      "filter": {
+        "installed_type": "particle_only",
+        "_filter_comment": "Factory default. SKU 004.619.49 ships with particle filter only. Update via QR maintenance event when filter is changed.",
+        "filter_change_device_age_anchor": null,
+        "_anchor_comment": "device_age (minutes) at time of last confirmed filter change. Null on first run — no confirmed filter change on record. Twin uses filter_age as best available estimate with lower confidence until first QR-logged change.",
+        "last_logged_filter_type": null,
+        "_last_type_comment": "Filter type recorded at last QR-logged filter change. Null until first logged change. Twin uses default_filter_type from device profile until populated."
+      },
+
+      "commissioned_at": null,
+      "_commissioned_comment": "ISO8601 timestamp of first successful twin engine reading. Populated automatically by twin engine on first run.",
+
+      "notes": "Zigbee dongle firmware updated to 8.0.2 before pairing. Factory firmware 7.4.5 would not pair with this device. Pairing button located inside unit behind front panel — not the external knob."
+    }
+  }
+}
