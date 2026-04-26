@@ -209,13 +209,23 @@ class TwinState:
 
     # --- Performance ---
     room_efficiency_factor:     float = 1.0
-    # Empirical CADR estimates for speeds 2-4, keyed by str(fan_speed).
-    # None until min_observations threshold met. Supersede interpolated
-    # priors from device profile once promoted.
+
+    # Empirical CADR estimates for manual mode speeds 2-4 (m³/h).
+    # Keyed by str(fan_speed). Supersede interpolated priors from device
+    # profile once empirical_cadr_min_observations threshold is met.
+    # Speeds 1 and 5 always use manufacturer anchors — never updated here.
     empirical_cadr_m3h:         dict = field(default_factory=dict)
-    # { "2": float|None, "3": float|None, "4": float|None }
-    performance_observation_counts: dict = field(default_factory=dict)
-    # { "1": int, "2": int, "3": int, "4": int, "5": int }
+    # { "2": float, "3": float, "4": float }
+
+    # Empirical performance curves for auto mode steps 1-9 (m³/h).
+    # Keyed by str(auto_step). Built entirely from observations —
+    # no manufacturer anchors exist for auto mode steps.
+    empirical_cadr_auto_m3h:    dict = field(default_factory=dict)
+    # { "1": float, "2": float, ..., "9": float }
+
+    # Observation counts per speed — manual and auto tracked separately
+    performance_observation_counts:      dict = field(default_factory=dict)
+    # { "manual": {"1": int, ..., "5": int}, "auto": {"1": int, ..., "9": int} }
 
     # --- Control ---
     last_fan_speed_commanded:   Optional[int] = None
@@ -265,6 +275,7 @@ class TwinState:
             # Performance
             "room_efficiency_factor":          self.room_efficiency_factor,
             "empirical_cadr_m3h":              self.empirical_cadr_m3h,
+            "empirical_cadr_auto_m3h":         self.empirical_cadr_auto_m3h,
             "performance_observation_counts":  self.performance_observation_counts,
             # Control
             "last_fan_speed_commanded":   self.last_fan_speed_commanded,
@@ -335,6 +346,7 @@ class TwinState:
             # Performance
             room_efficiency_factor=get("room_efficiency_factor", 1.0),
             empirical_cadr_m3h=get("empirical_cadr_m3h", {}),
+            empirical_cadr_auto_m3h=get("empirical_cadr_auto_m3h", {}),
             performance_observation_counts=get("performance_observation_counts", {}),
             # Control
             last_fan_speed_commanded=get("last_fan_speed_commanded"),
@@ -384,9 +396,17 @@ class DeviceProfile:
     sku:                    str
     zigbee_friendly_name:   str
 
+    # Manual mode fan speeds — 1-5 for Starkvind
     fan_speeds_valid:       list[int]
     fan_speed_min:          int
     fan_speed_max:          int
+
+    # Auto mode fan speeds — separate scale, separate empirical curve
+    # 1-9 for Starkvind. Empty list if device has no distinct auto scale.
+    auto_fan_speeds_valid:  list[int]
+    auto_fan_speed_min:     int
+    auto_fan_speed_max:     int
+    auto_mode_cadr_source:  str   # "empirical_only" | "manufacturer"
 
     # cadr[filter_config][str(fan_speed)] → CadrEntry
     cadr:                   dict[str, dict[str, CadrEntry]]

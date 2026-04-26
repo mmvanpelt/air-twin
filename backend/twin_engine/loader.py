@@ -235,6 +235,8 @@ def get_device_profile(model_id: str) -> DeviceProfile:
         )
 
     fan = d.get("fan_speeds", {})
+    manual_fan = fan.get("manual", fan)  # fall back to flat structure for older profiles
+    auto_fan = fan.get("auto", {})
     control = d.get("control", {})
     perf = d.get("performance_model", {})
 
@@ -245,9 +247,13 @@ def get_device_profile(model_id: str) -> DeviceProfile:
         device_type=d["type"],
         sku=d["sku"],
         zigbee_friendly_name=d["zigbee_friendly_name"],
-        fan_speeds_valid=fan.get("valid", [1, 2, 3, 4, 5]),
-        fan_speed_min=fan.get("min", 1),
-        fan_speed_max=fan.get("max", 5),
+        fan_speeds_valid=manual_fan.get("valid", [1, 2, 3, 4, 5]),
+        fan_speed_min=manual_fan.get("min", 1),
+        fan_speed_max=manual_fan.get("max", 5),
+        auto_fan_speeds_valid=auto_fan.get("valid", []),
+        auto_fan_speed_min=auto_fan.get("min", 1),
+        auto_fan_speed_max=auto_fan.get("max", 9),
+        auto_mode_cadr_source=perf.get("auto_mode_cadr_source", "empirical_only"),
         cadr=cadr,
         interpolation_policy=interpolation_policy,
         filter_types=filter_types,
