@@ -1,25 +1,25 @@
 import sqlite3
 import logging
 from pathlib import Path
- 
+
 log = logging.getLogger(__name__)
- 
+
 DB_PATH = Path(__file__).parent.parent / "data" / "airtwin.db"
- 
- 
+
+
 def get_connection() -> sqlite3.Connection:
     conn = sqlite3.connect(DB_PATH, check_same_thread=False)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA foreign_keys=ON")
     return conn
- 
- 
+
+
 def init_db():
     """Create all tables and views. Safe to call on every startup."""
     conn = get_connection()
     c = conn.cursor()
- 
+
     c.executescript("""
         CREATE TABLE IF NOT EXISTS raw_readings (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -42,8 +42,8 @@ def init_db():
             pm25_internal   REAL,       -- µg/m³ from IKEA internal sensor
             control_source  TEXT        -- twin_engine or local_fallback (Phase 3)
         );
- 
-        -- Events: threshold crossings, regime transitions, sparse
+
+        -- Events: threshold crossings, spike events, uncommanded state changes
         CREATE TABLE IF NOT EXISTS events (
             id          INTEGER PRIMARY KEY AUTOINCREMENT,
             ts          TEXT NOT NULL,
@@ -52,8 +52,8 @@ def init_db():
             value       REAL,
             regime      TEXT
         );
- 
-        -- Maintenance events: filter changes, actor, before/after state
+
+        -- Maintenance events: filter changes, technician resets
         CREATE TABLE IF NOT EXISTS maintenance_events (
             id                   INTEGER PRIMARY KEY AUTOINCREMENT,
             ts                   TEXT NOT NULL,
@@ -65,7 +65,7 @@ def init_db():
             pm25_after           REAL,
             notes                TEXT
         );
- 
+
         -- State transitions: every FSM regime change
         CREATE TABLE IF NOT EXISTS state_transitions (
             id              INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -75,7 +75,7 @@ def init_db():
             reason          TEXT,
             duration_sec    INTEGER
         );
- 
+
         -- Escalation events: operator alerts and responses
         CREATE TABLE IF NOT EXISTS escalation_events (
             id                INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -86,7 +86,7 @@ def init_db():
             operator_response TEXT,
             resolved          INTEGER NOT NULL DEFAULT 0
         );
- 
+
         -- Control log: every purifier command issued
         CREATE TABLE IF NOT EXISTS control_log (
             id                INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -97,29 +97,43 @@ def init_db():
             pm25_at_command   REAL,
             observed_response TEXT
         );
- 
+
+        -- Performance observations: purifier response events with decay rates
+        CREATE TABLE IF NOT EXISTS performance_observations (
+            id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts_start                TEXT NOT NULL,
+            ts_peak                 TEXT,
+            ts_end                  TEXT,
+            fan_speed               INTEGER,
+            observed_decay_rate     REAL,   -- µg/m³ per minute
+            expected_decay_rate     REAL,   -- µg/m³ per minute
+            performance_ratio       REAL,   -- observed / expected
+            filter_type             TEXT,
+            twin_filter_age_hours   REAL
+        );
+
         -- Views
         CREATE VIEW IF NOT EXISTS recent_readings AS
             SELECT * FROM raw_readings
             ORDER BY ts DESC
             LIMIT 300;
- 
+
         CREATE VIEW IF NOT EXISTS open_escalations AS
             SELECT * FROM escalation_events
             WHERE resolved = 0
             ORDER BY ts_raised DESC;
- 
+
         CREATE VIEW IF NOT EXISTS filter_history AS
             SELECT * FROM maintenance_events
             WHERE event_type = 'filter_change'
             ORDER BY ts DESC;
     """)
- 
+
     conn.commit()
     conn.close()
     log.info(f"Database initialised at {DB_PATH}")
- 
- 
+
+
 def insert_reading(conn: sqlite3.Connection, payload: dict):
     """Insert one qualified reading from the MQTT subscriber."""
     conn.execute("""
@@ -140,8 +154,8 @@ def insert_reading(conn: sqlite3.Connection, payload: dict):
         )
     """, payload)
     conn.commit()
- 
- 
+
+
 def insert_event(conn: sqlite3.Connection, event_type: str, detail: str = None,
                  value: float = None, regime: str = None):
     from datetime import datetime, timezone
@@ -150,8 +164,8 @@ def insert_event(conn: sqlite3.Connection, event_type: str, detail: str = None,
         VALUES (?, ?, ?, ?, ?)
     """, (datetime.now(timezone.utc).isoformat(), event_type, detail, value, regime))
     conn.commit()
- 
- 
+
+
 def insert_state_transition(conn: sqlite3.Connection, from_regime: str,
                              to_regime: str, reason: str = None, duration_sec: int = None):
     from datetime import datetime, timezone
@@ -160,8 +174,8 @@ def insert_state_transition(conn: sqlite3.Connection, from_regime: str,
         VALUES (?, ?, ?, ?, ?)
     """, (datetime.now(timezone.utc).isoformat(), from_regime, to_regime, reason, duration_sec))
     conn.commit()
- 
- 
+
+
 def insert_control_log(conn: sqlite3.Connection, command: str, value: str,
                        control_source: str, pm25_at_command: float = None,
                        observed_response: str = None):
@@ -172,8 +186,8 @@ def insert_control_log(conn: sqlite3.Connection, command: str, value: str,
     """, (datetime.now(timezone.utc).isoformat(), command, value, control_source,
           pm25_at_command, observed_response))
     conn.commit()
- 
- 
+
+
 if __name__ == "__main__":
     logging.basicConfig(level=logging.INFO)
     init_db()
