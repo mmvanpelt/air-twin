@@ -23,18 +23,18 @@ same underlying assessment — never divergent conclusions.
 import logging
 from typing import Optional
 
-from twin_engine.confidence import (
+from backend.twin_engine.confidence import (
     all_active_factors,
     confidence_conclusion,
     dominant_negative_factor,
 )
-from twin_engine.filter import (
+from backend.twin_engine.filter import (
     best_filter_age_hours,
     filter_life_fraction,
     no_anchor_on_record,
 )
-from twin_engine.models import RegimeType, TwinState
-from twin_engine.regime import regime_summary
+from backend.twin_engine.models import RegimeType, TwinState
+from backend.twin_engine.regime import regime_summary
 
 logger = logging.getLogger(__name__)
 
@@ -365,7 +365,7 @@ def _baseline_context(state: TwinState) -> dict:
     season_mismatch = False
     if state.baseline_locked_season is not None:
         current_month = datetime.datetime.now(datetime.timezone.utc).month
-        from twin_engine.models import season_from_month
+        from backend.twin_engine.models import season_from_month
         current_season = season_from_month(current_month)
         season_mismatch = current_season != state.baseline_locked_season
 

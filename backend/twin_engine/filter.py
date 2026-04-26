@@ -25,7 +25,7 @@ import logging
 from dataclasses import replace
 from typing import Optional
 
-from twin_engine.models import (
+from backend.twin_engine.models import (
     Reading,
     TwinState,
     utc_now,
@@ -208,7 +208,7 @@ def on_qr_filter_change(
     Returns:
         Updated TwinState
     """
-    from twin_engine.models import FilterType
+    from backend.twin_engine.models import FilterType
     try:
         ft = FilterType(filter_type)
     except ValueError:
