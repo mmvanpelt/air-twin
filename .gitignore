@@ -233,3 +233,12 @@ __pycache__/
 data/airtwin.db
 data/airtwin.db-shm
 data/airtwin.db-wal
+
+# 3D scan source files — keep locally, do not commit
+*.ply
+*.usdz
+*.obj
+*.fbx
+*.blend
+*.blend1
+frontend/assets/raw/
