@@ -1,0 +1,227 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Air Twin — Digital Twin</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+  <!-- ── Header ─────────────────────────────────────────────── -->
+  <header id="header">
+    <div class="header-left">
+      <div class="logo">
+        <span class="logo-mark"></span>
+        <span class="logo-text">AIR TWIN</span>
+      </div>
+      <div class="system-status" id="system-status">
+        <span class="status-dot" id="status-dot"></span>
+        <span class="status-label" id="status-label">CONNECTING</span>
+      </div>
+    </div>
+
+    <nav class="role-tabs" id="role-tabs">
+      <button class="tab active" data-role="operator">OPERATOR</button>
+      <button class="tab" data-role="executive">EXECUTIVE</button>
+      <button class="tab" data-role="engineer">ENGINEER</button>
+      <button class="tab" data-role="technician">TECHNICIAN</button>
+    </nav>
+
+    <div class="header-right">
+      <div class="mode-toggle" id="mode-toggle">
+        <button class="mode-btn active" id="btn-demo" data-mode="demo">DEMO</button>
+        <button class="mode-btn" id="btn-live" data-mode="live">LIVE</button>
+      </div>
+      <div class="ts-display" id="ts-display">--:--:--</div>
+    </div>
+  </header>
+
+  <!-- ── Main layout ────────────────────────────────────────── -->
+  <main id="main">
+
+    <!-- 3D Viewport -->
+    <div id="viewport-container">
+      <canvas id="three-canvas"></canvas>
+      <div id="viewport-hint">drag to rotate · scroll to zoom</div>
+      <div id="regime-badge" class="regime-badge">INITIALISING</div>
+    </div>
+
+    <!-- HUD panels — role-aware -->
+    <aside id="hud">
+
+      <!-- ── OPERATOR view ──────────────────────────────────── -->
+      <div class="role-view active" data-role="operator">
+        <div class="hud-section">
+          <div class="metric-primary">
+            <span class="metric-label">PM2.5</span>
+            <span class="metric-value" id="op-pm25">—</span>
+            <span class="metric-unit">µg/m³</span>
+          </div>
+          <div class="metric-row">
+            <div class="metric-small">
+              <span class="metric-label">REGIME</span>
+              <span class="metric-value-sm" id="op-regime">—</span>
+            </div>
+            <div class="metric-small">
+              <span class="metric-label">FAN</span>
+              <span class="metric-value-sm" id="op-fan">—</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="hud-section">
+          <div class="conclusion-box" id="op-conclusion">
+            —
+          </div>
+        </div>
+
+        <div class="hud-section">
+          <div class="section-title">ACTIVE ALERTS</div>
+          <div class="alert-list" id="op-alerts">
+            <div class="alert-empty">No active alerts</div>
+          </div>
+        </div>
+
+        <div class="hud-section">
+          <div class="section-title">FILTER</div>
+          <div class="filter-bar-wrap">
+            <div class="filter-bar-track">
+              <div class="filter-bar-fill" id="op-filter-bar"></div>
+            </div>
+            <span class="filter-pct" id="op-filter-pct">—%</span>
+          </div>
+          <div class="filter-meta" id="op-filter-meta">—</div>
+        </div>
+      </div>
+
+      <!-- ── EXECUTIVE view ─────────────────────────────────── -->
+      <div class="role-view" data-role="executive">
+        <div class="hud-section">
+          <div class="exec-conclusion" id="exec-conclusion">—</div>
+        </div>
+        <div class="hud-section">
+          <div class="section-title">REQUIRED ACTIONS</div>
+          <div class="action-list" id="exec-actions">
+            <div class="action-empty">No actions required</div>
+          </div>
+        </div>
+        <div class="hud-section exec-meta">
+          <div class="exec-meta-row">
+            <span class="exec-meta-label">Confidence</span>
+            <span class="exec-meta-value" id="exec-confidence">—</span>
+          </div>
+          <div class="exec-meta-row">
+            <span class="exec-meta-label">Regime</span>
+            <span class="exec-meta-value" id="exec-regime">—</span>
+          </div>
+          <div class="exec-meta-row">
+            <span class="exec-meta-label">Baseline</span>
+            <span class="exec-meta-value" id="exec-baseline">—</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── ENGINEER view ──────────────────────────────────── -->
+      <div class="role-view" data-role="engineer">
+        <div class="hud-section">
+          <div class="section-title">CONFIDENCE</div>
+          <div class="confidence-score-wrap">
+            <svg class="confidence-arc" viewBox="0 0 100 60">
+              <path class="arc-track" d="M 10 55 A 40 40 0 0 1 90 55" fill="none" stroke-width="6"/>
+              <path class="arc-fill" id="eng-arc" d="M 10 55 A 40 40 0 0 1 90 55" fill="none" stroke-width="6" stroke-dasharray="0 126"/>
+              <text class="arc-label" x="50" y="48" text-anchor="middle" id="eng-confidence-val">—</text>
+            </svg>
+          </div>
+          <div class="confidence-factors" id="eng-factors">
+            <!-- populated by ui.js -->
+          </div>
+        </div>
+
+        <div class="hud-section">
+          <div class="section-title">BASELINE</div>
+          <div class="baseline-grid" id="eng-baseline">
+            <div class="bl-row"><span>Locked</span><span id="bl-locked">—</span></div>
+            <div class="bl-row"><span>Current</span><span id="bl-current">—</span></div>
+            <div class="bl-row"><span>Std</span><span id="bl-std">—</span></div>
+            <div class="bl-row"><span>Season</span><span id="bl-season">—</span></div>
+          </div>
+        </div>
+
+        <div class="hud-section">
+          <div class="section-title">PERFORMANCE</div>
+          <div class="perf-grid">
+            <div class="bl-row"><span>Room REF</span><span id="eng-ref">—</span></div>
+            <div class="bl-row"><span>Filter age</span><span id="eng-filter-age">—</span></div>
+            <div class="bl-row"><span>Filter life</span><span id="eng-filter-life">—%</span></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- ── TECHNICIAN view ────────────────────────────────── -->
+      <div class="role-view" data-role="technician">
+        <div class="hud-section">
+          <div class="section-title">PENDING ACTIONS</div>
+          <div class="action-list" id="tech-actions">
+            <div class="action-empty">No pending actions</div>
+          </div>
+        </div>
+
+        <div class="hud-section">
+          <div class="section-title">DEVICE STATUS</div>
+          <div class="device-grid">
+            <div class="bl-row"><span>Commissioned</span><span id="tech-commissioned">—</span></div>
+            <div class="bl-row"><span>Filter type</span><span id="tech-filter-type">—</span></div>
+            <div class="bl-row"><span>Filter age</span><span id="tech-filter-age">—</span></div>
+            <div class="bl-row"><span>Device age</span><span id="tech-device-age">—</span></div>
+            <div class="bl-row"><span>Pending reset</span><span id="tech-pending-reset">—</span></div>
+          </div>
+        </div>
+
+        <div class="hud-section">
+          <div class="section-title">LOG FILTER CHANGE</div>
+          <div class="maintenance-form">
+            <select id="tech-filter-select">
+              <option value="particle_only">Particle filter only</option>
+              <option value="particle_and_gas">Particle + gas filter</option>
+            </select>
+            <button class="maint-btn" id="tech-log-change">LOG CHANGE</button>
+          </div>
+          <div class="maint-result" id="tech-maint-result"></div>
+        </div>
+      </div>
+
+    </aside>
+  </main>
+
+  <!-- ── Timeline scrubber (demo mode only) ────────────────── -->
+  <div id="timeline" class="timeline hidden">
+    <div class="timeline-inner">
+      <button class="tl-btn" id="tl-play">▶</button>
+      <div class="tl-track-wrap">
+        <div class="tl-pm25-sparkline" id="tl-sparkline"></div>
+        <input type="range" id="tl-scrubber" class="tl-scrubber" min="0" max="100" value="0">
+      </div>
+      <div class="tl-time" id="tl-time">0:00 / 0:00</div>
+      <select class="tl-speed" id="tl-speed">
+        <option value="1">1×</option>
+        <option value="2">2×</option>
+        <option value="5">5×</option>
+        <option value="10">10×</option>
+        <option value="30">30×</option>
+      </select>
+    </div>
+  </div>
+
+  <!-- ── Scripts ────────────────────────────────────────────── -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="js/state.js"></script>
+  <script src="js/demo.js"></script>
+  <script src="js/scene.js"></script>
+  <script src="js/ui.js"></script>
+
+</body>
+</html>
