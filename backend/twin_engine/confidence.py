@@ -46,11 +46,23 @@ CONFIDENCE_TIERS = [
 ]
 
 
-def confidence_conclusion(confidence: float) -> str:
+
+REGIME_CONCLUSIONS = {
+    "event":        "Temporary air quality event detected. Purifier responding.",
+    "degraded":     "Air quality degraded. Investigate source.",
+    "initialising": "System establishing baseline — no action required.",
+    "validating":   "Baseline re-establishing after maintenance.",
+    "unknown":      "Sensor data unavailable — check connections.",
+}
+
+def confidence_conclusion(confidence: float, regime: str = "baseline") -> str:
     """
-    Return the tiered conclusion string for a given confidence score.
-    Used by brief_generator.py to produce the executive brief conclusion.
+    Return tiered conclusion for confidence score and regime.
+    Regime-specific conclusions take precedence for non-baseline regimes.
     """
+    regime_key = regime.lower().replace("regimetype.", "").strip()
+    if regime_key in REGIME_CONCLUSIONS:
+        return REGIME_CONCLUSIONS[regime_key]
     for low, high, conclusion in CONFIDENCE_TIERS:
         if low <= confidence <= high:
             return conclusion

@@ -70,7 +70,8 @@ def generate(
         Dict with keys: executive, operator, engineer, technician, meta
     """
     # Derive shared context used across all views
-    conclusion = confidence_conclusion(state.confidence)
+    regime_str = str(state.current_regime).lower().replace("regimetype.", "")
+    conclusion = confidence_conclusion(state.confidence, regime=regime_str)
     required_actions = _required_actions(
         state=state,
         device_age_minutes=device_age_minutes,
@@ -273,6 +274,13 @@ def _required_actions(
     # Regime-based actions — highest priority
     if state.current_regime == RegimeType.DEGRADED:
         actions.append("Air quality degraded — investigate source and increase ventilation")
+
+    if state.current_regime == RegimeType.EVENT:
+        actions.append(
+            "Temporary air quality event in progress — purifier responding. "
+            "If source is known (cooking, candle), no action required. "
+            "If source unknown, investigate."
+        )
 
     if state.current_regime == RegimeType.UNKNOWN:
         actions.append("Sensor data unavailable — check Pi and sensor connections")

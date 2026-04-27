@@ -31,6 +31,7 @@ class RegimeType(str, Enum):
     INITIALISING = "initialising"
     VALIDATING   = "validating"
     BASELINE     = "baseline"
+    EVENT        = "event"
     DEGRADED     = "degraded"
     UNKNOWN      = "unknown"
 

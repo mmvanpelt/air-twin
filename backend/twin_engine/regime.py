@@ -165,9 +165,18 @@ def evaluate(
             )
         return state, None
 
-    # --- BASELINE → DEGRADED on sustained exceedance ---
+    # --- BASELINE → EVENT on exceedance ---
     if current == RegimeType.BASELINE:
         return _evaluate_baseline(
+            state, reading, asset_id,
+            deviation_from_locked,
+            degraded_entry_std_multiplier,
+            degraded_entry_duration_minutes,
+        )
+
+    # --- EVENT → BASELINE (resolved) or DEGRADED (sustained) ---
+    if current == RegimeType.EVENT:
+        return _evaluate_event(
             state, reading, asset_id,
             deviation_from_locked,
             degraded_entry_std_multiplier,
@@ -235,6 +244,7 @@ def is_operational(state: TwinState) -> bool:
     """
     return state.current_regime in (
         RegimeType.BASELINE,
+        RegimeType.EVENT,
         RegimeType.DEGRADED,
     )
 
@@ -295,10 +305,10 @@ def _evaluate_baseline(
         if _exceedance_minutes[asset_id] >= degraded_entry_duration_minutes:
             reset_trackers(asset_id)
             return _transition_if_needed(
-                state, RegimeType.DEGRADED, asset_id,
-                reason=f"Rolling mean exceeded baseline_locked + "
-                       f"{degraded_entry_std_multiplier}×std for "
-                       f"{degraded_entry_duration_minutes} minutes "
+                state, RegimeType.EVENT, asset_id,
+                reason=f"PM2.5 exceeded baseline_locked + "
+                       f"{degraded_entry_std_multiplier}×std — "
+                       f"monitoring for resolution "
                        f"(deviation={deviation_from_locked:.2f} std)"
             )
     else:
@@ -317,6 +327,47 @@ def _evaluate_baseline(
 # ---------------------------------------------------------------------------
 # Internal — degraded regime evaluation
 # ---------------------------------------------------------------------------
+
+
+def _evaluate_event(
+    state: TwinState,
+    reading: Reading,
+    asset_id: str,
+    deviation_from_locked: Optional[float],
+    degraded_entry_std_multiplier: float,
+    degraded_entry_duration_minutes: float,
+) -> tuple[TwinState, Optional[RegimeTransition]]:
+    """
+    Evaluate EVENT regime — transient air quality event in progress.
+    Resolves to BASELINE if PM2.5 returns to range within window.
+    Escalates to DEGRADED if elevation is sustained.
+    """
+    if asset_id not in _exceedance_minutes:
+        _exceedance_minutes[asset_id] = 0.0
+
+    if deviation_from_locked is None:
+        state = _update_duration(state)
+        return state, None
+
+    if deviation_from_locked > degraded_entry_std_multiplier:
+        _exceedance_minutes[asset_id] += 1.0 / 60.0
+        if _exceedance_minutes[asset_id] >= degraded_entry_duration_minutes:
+            reset_trackers(asset_id)
+            return _transition_if_needed(
+                state, RegimeType.DEGRADED, asset_id,
+                reason=f"EVENT not resolved within {degraded_entry_duration_minutes} min "
+                       f"— escalating to DEGRADED"
+            )
+    else:
+        reset_trackers(asset_id)
+        return _transition_if_needed(
+            state, RegimeType.BASELINE, asset_id,
+            reason="Transient event resolved — PM2.5 returned to baseline range"
+        )
+
+    state = _update_duration(state)
+    return state, None
+
 
 def _evaluate_degraded(
     state: TwinState,
