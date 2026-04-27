@@ -1,0 +1,13 @@
+{
+  "liveServer.settings.root": "/frontend",
+  "liveServer.settings.ignoreFiles": [
+    ".git/**",
+    "data/**",
+    "venv/**",
+    "**/__pycache__/**",
+    "**/*.db",
+    "**/*.db-wal",
+    "**/*.db-shm",
+    "data/twin_state.json"
+  ]
+}

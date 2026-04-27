@@ -99,16 +99,16 @@ const AirTwinState = (() => {
       _state = {
         ..._state,
         ts: frame.ts || _state.ts,
-        pm25: frame.pm25 ?? _state.pm25,
+        pm25: frame.pm25 ?? frame.value ?? _state.pm25,
         pm25_internal: frame.pm25_internal ?? _state.pm25_internal,
-        regime: normaliseRegime(frame.regime || _state.regime),
+        regime: normaliseRegime(frame.regime || _deriveRegime(frame, _state)),
         confidence: frame.confidence ?? _state.confidence,
         confidence_conclusion: frame.confidence_conclusion || _state.confidence_conclusion,
         baseline_locked: frame.baseline_locked ?? _state.baseline_locked,
         baseline_current: frame.baseline_current ?? _state.baseline_current,
         fan_speed: frame.fan_speed ?? _state.fan_speed,
         fan_mode: frame.fan_mode ?? _state.fan_mode,
-        purifier_on: frame.purifier_on ?? _state.purifier_on,
+        purifier_on: frame.purifier_on != null ? Boolean(frame.purifier_on) : _state.purifier_on,
         filter_status: frame.filter_status || _state.filter_status,
         confidence_factors: frame.confidence_factors || _state.confidence_factors,
         regime_summary: frame.regime_summary || _state.regime_summary,
@@ -181,5 +181,15 @@ const AirTwinState = (() => {
     return colors[regime] || '#6b7280';
   }
 
+  function _deriveRegime(frame, currentState) {
+    if (currentState.baseline_locked == null) return 'initialising';
+    const val = frame.value || frame.pm25 || 0;
+    const baseline = currentState.baseline_locked;
+    const std = currentState.baseline_std || 1;
+    const deviation = (val - baseline) / std;
+    if (deviation > 3) return 'event';
+    return 'baseline';
+  }
+  
   return { on, update, get, normaliseRegime, regimeClass, regimeLabel, regimeColor };
 })();
