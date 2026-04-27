@@ -1,10 +1,12 @@
 {
   "_comment": "Runtime configuration for Air Twin. Environment-specific and operational parameters live here. Device-specific facts live in device_profiles.json. Asset-specific facts live in asset_registry.json.",
   "room": {
-    "volume_m3": 69.6,
+    "volume_m3": 79.8,
     "shape": "L-shaped",
-    "_volume_comment": "Derived from physical measurements. Wide section: 10'6\" x 15'9\" x 8'H = 37.48 m3. Narrow section: 13'6\" x 10'6\" x 8'H = 32.09 m3. Total: 69.57 m3, rounded to 69.6 m3. To be validated against Polycam 3D scan mesh volume when Blender pipeline is complete.",
-    "_shape_comment": "L-shaped room. Well-mixed room assumption applies with reduced accuracy relative to a rectangular room of equal volume. Room efficiency factor in twin_state.json absorbs geometric inefficiency empirically."
+    "_volume_comment": "Derived from Polycam LiDAR scan. Wide section: 3.20m x 7.46m x 2.57m = 61.4 m3. Narrow section: 1.60m x 4.49m x 2.57m = 18.5 m3. Total: 79.8 m3. Previous hand estimate was 69.6 m3.",
+    "_shape_comment": "L-shaped room. Well-mixed room assumption applies with reduced accuracy relative to a rectangular room of equal volume. Room efficiency factor in twin_state.json absorbs geometric inefficiency empirically.",
+    "floor_slab_thickness_m": 0.1,
+    "scan_derived": true
   },
   "baseline": {
     "min_readings_to_lock": 900,
