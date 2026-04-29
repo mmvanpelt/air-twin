@@ -202,6 +202,47 @@
         "weight_kg": 5.9,
         "max_coverage_m2": 20,
         "_coverage_comment": "IKEA states up to 215 sq ft (approx 20 m2) depending on fan speed. This is a marketing figure based on the well-mixed room model. Twin engine uses CADR / room_volume for actual performance modelling."
+      },
+      "consumables": {
+        "particle_filter": {
+          "life_hours": 4380,
+          "replacement_cost_usd": {
+            "low": 15,
+            "high": 25
+          },
+          "part_description": "HEPA particle filter"
+        },
+        "particle_and_gas_filter": {
+          "life_hours": 4380,
+          "replacement_cost_usd": {
+            "low": 25,
+            "high": 40
+          },
+          "part_description": "HEPA + activated carbon gas filter"
+        }
+      },
+      "device_life_hours": 26280,
+      "_device_life_comment": "~3 years typical use at 8h/day",
+      "power_watts_by_speed": {
+        "manual": {
+          "1": 3,
+          "2": 5,
+          "3": 8,
+          "4": 12,
+          "5": 16
+        },
+        "auto": {
+          "1": 3,
+          "2": 4,
+          "3": 6,
+          "4": 9,
+          "5": 12,
+          "6": 15,
+          "7": 18,
+          "8": 21,
+          "9": 25
+        },
+        "_comment": "Approximate watts at each fan speed step"
       }
     }
   }

@@ -158,28 +158,84 @@ const AirTwinUI = (() => {
   // ── Executive view ──────────────────────────────────────────
 
   function _updateExecutive(state) {
+    // Air quality conclusion — plain English only
     const concEl = document.getElementById('exec-conclusion');
     if (concEl) {
       concEl.textContent = state.confidence_conclusion || '—';
     }
 
+    // Asset status
+    const assetStatusEl = document.getElementById('exec-asset-status');
+    const assetMetaEl = document.getElementById('exec-asset-meta');
+    const assetStatus = state.asset_status || 'unknown';
+    const assetLabels = {
+      operating_normally: 'Operating normally',
+      responding:         'Responding to air quality event',
+      performance_low:    'Performance below expected — review recommended',
+      filter_due:         'Filter replacement due',
+      offline:            'Offline — check connections',
+      unknown:            'Status unknown',
+    };
+    const assetColors = {
+      operating_normally: 'var(--c-baseline-hi)',
+      responding:         'var(--c-event)',
+      performance_low:    'var(--c-degraded)',
+      filter_due:         'var(--c-degraded)',
+      offline:            'var(--c-critical)',
+      unknown:            'var(--c-unknown)',
+    };
+    if (assetStatusEl) {
+      assetStatusEl.textContent = assetLabels[assetStatus] || assetStatus;
+      assetStatusEl.style.color = assetColors[assetStatus] || 'var(--text-secondary)';
+    }
+
+    // Asset health from full brief if available
+    const ah = state.asset_health;
+    if (ah) {
+      if (assetMetaEl) {
+        const years = ah.device?.years_remaining;
+        assetMetaEl.textContent = years != null ?
+          `Est. ${years.toFixed(1)} years remaining asset life` : '—';
+      }
+
+      // Costs
+      const costs = ah.costs;
+      if (costs) {
+        _setText('exec-cost-energy',  `$${(costs.energy_monthly_usd || 0).toFixed(2)}/mo`);
+        _setText('exec-cost-filter',  `$${(costs.filter_monthly_usd || 0).toFixed(2)}/mo`);
+        _setText('exec-cost-total',   `$${(costs.total_monthly_usd  || 0).toFixed(2)}/mo`);
+        _setText('exec-cost-annual',  `$${(costs.total_annual_usd   || 0).toFixed(2)}/yr`);
+      }
+
+      // Service level
+      const sl = ah.service_level;
+      if (sl) {
+        const slBar = document.getElementById('exec-service-bar');
+        const slPct = document.getElementById('exec-service-pct');
+        const slLabel = document.getElementById('exec-service-label');
+        if (slBar) {
+          slBar.style.width = `${sl.compliance_pct || 0}%`;
+          slBar.style.background = sl.met ?
+            'var(--c-baseline-hi)' : 'var(--c-degraded)';
+        }
+        if (slPct) slPct.textContent = `${(sl.compliance_pct || 0).toFixed(1)}%`;
+        if (slLabel) slLabel.textContent = sl.met ?
+          `Service level met (target ${sl.target_pct}%)` :
+          `⚠ Below target ${sl.target_pct}% — investigate`;
+      }
+    } else {
+      // No asset_health yet — show placeholders with available state
+      if (assetMetaEl) assetMetaEl.textContent = 'Asset health data loading...';
+    }
+
+    // Required actions
     const actionsEl = document.getElementById('exec-actions');
     if (actionsEl) {
       const actions = _buildActions(state);
-      if (actions.length === 0) {
-        actionsEl.innerHTML = '<div class="action-empty">No actions required</div>';
-      } else {
-        actionsEl.innerHTML = actions.map(a =>
-          `<div class="action-item">${_esc(a)}</div>`
-        ).join('');
-      }
+      actionsEl.innerHTML = actions.length === 0 ?
+        '<div class="action-empty">No actions required</div>' :
+        actions.map(a => `<div class="action-item">${_esc(a)}</div>`).join('');
     }
-
-    _setText('exec-confidence', state.confidence != null ?
-      `${(state.confidence * 100).toFixed(0)}%` : '—');
-    _setText('exec-regime', AirTwinState.regimeLabel(state.regime));
-    _setText('exec-baseline', state.baseline_locked != null ?
-      `${state.baseline_locked.toFixed(2)} µg/m³` : 'Not locked');
   }
 
   // ── Engineer view ───────────────────────────────────────────
@@ -242,6 +298,28 @@ const AirTwinUI = (() => {
       _setText('eng-filter-life', fs.life_percent != null ?
         `${fs.life_percent.toFixed(0)}%` : '—%');
     }
+
+    // Asset status and service level
+    _setText('eng-asset-status', state.asset_status ?
+      state.asset_status.replace(/_/g, ' ') : '—');
+    _setText('eng-service-level', state.service_level_compliance_pct != null ?
+      `${state.service_level_compliance_pct.toFixed(1)}% (30-day)` : '—');
+
+    // Asset life and costs from asset_health
+    const ah = state.asset_health;
+    if (ah) {
+      if (ah.device) {
+        _setText('eng-device-life-pct', `${ah.device.life_remaining_pct || 0}%`);
+        _setText('eng-device-years', ah.device.years_remaining != null ?
+          `${ah.device.years_remaining.toFixed(1)} years` : '—');
+      }
+      if (ah.costs) {
+        _setText('eng-cost-energy',  `$${(ah.costs.energy_monthly_usd || 0).toFixed(2)}`);
+        _setText('eng-cost-filter',  `$${(ah.costs.filter_monthly_usd || 0).toFixed(2)}`);
+        _setText('eng-cost-total',   `$${(ah.costs.total_monthly_usd  || 0).toFixed(2)}`);
+        _setText('eng-cost-kwh',     `${(state.monthly_energy_kwh || 0).toFixed(2)} kWh`);
+      }
+    }
   }
 
   // ── Technician view ─────────────────────────────────────────
@@ -259,6 +337,42 @@ const AirTwinUI = (() => {
       }
     }
 
+    // Filter life bar — from asset_health if available
+    const ah = state.asset_health;
+    if (ah && ah.filter) {
+      const ft = ah.filter;
+      const barEl = document.getElementById('tech-filter-bar');
+      const pctEl = document.getElementById('tech-filter-pct');
+      if (barEl) {
+        const pct = ft.life_remaining_pct || 0;
+        barEl.style.width = `${pct}%`;
+        barEl.style.background = pct < 15 ? 'var(--c-degraded)' :
+                                  pct < 30 ? 'var(--c-event)' :
+                                  'var(--c-baseline-hi)';
+      }
+      if (pctEl) pctEl.textContent = `${ft.life_remaining_pct || 0}%`;
+      _setText('tech-filter-weeks',
+        ft.weeks_to_replacement != null ?
+        `Est. replacement in ${ft.weeks_to_replacement} weeks` : '—');
+      _setText('tech-filter-cost',
+        ft.replacement_cost_low != null ?
+        `Replacement cost: $${ft.replacement_cost_low}–${ft.replacement_cost_high}` : '—');
+    } else {
+      // Fallback from raw filter_status
+      const fs = state.filter_status;
+      if (fs) {
+        const barEl = document.getElementById('tech-filter-bar');
+        const pctEl = document.getElementById('tech-filter-pct');
+        if (barEl && fs.life_percent != null) {
+          barEl.style.width = `${fs.life_percent}%`;
+          barEl.style.background = fs.life_percent < 15 ? 'var(--c-degraded)' :
+                                    fs.life_percent < 30 ? 'var(--c-event)' :
+                                    'var(--c-baseline-hi)';
+        }
+        if (pctEl) pctEl.textContent = `${(fs.life_percent || 0).toFixed(0)}%`;
+      }
+    }
+
     _setText('tech-commissioned', state.commissioned_at ?
       new Date(state.commissioned_at).toLocaleDateString() : '—');
     _setText('tech-filter-type',
@@ -270,7 +384,6 @@ const AirTwinUI = (() => {
         `${fs.age_hours.toFixed(0)}h` : '—');
     }
 
-    // Device age from raw state
     if (state.last_known_filter_age != null) {
       const hours = (state.last_known_filter_age / 60).toFixed(0);
       _setText('tech-device-age', `${hours}h`);

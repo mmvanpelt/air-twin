@@ -88,6 +88,7 @@ const AirTwinScene = (() => {
         }
       });
       _scene.add(_purifierMesh);
+      _registerAssetMesh(_purifierMesh, 'starkvind_01', 'purifier');
     });
 
     _loadGLB('assets/pm25.glb', (gltf) => {
@@ -105,6 +106,7 @@ const AirTwinScene = (() => {
         }
       });
       _scene.add(_sensorMesh);
+      _registerAssetMesh(_sensorMesh, 'sds011_01', 'sensor');
     });
 
     // Orbit controls
@@ -126,6 +128,114 @@ const AirTwinScene = (() => {
     canvas.addEventListener('mousedown', _hideHint, { once: true });
     canvas.addEventListener('touchstart', _hideHint, { once: true });
   }
+
+  // ── Asset hover tooltip ─────────────────────────────────────
+
+  let _raycaster = null;
+  let _mouse = new THREE.Vector2();
+  let _hoveredAsset = null;
+  let _tooltipAssets = []; // meshes with asset metadata
+
+  function _initTooltip(canvas) {
+    _raycaster = new THREE.Raycaster();
+
+    canvas.addEventListener('mousemove', (e) => {
+      const rect = canvas.getBoundingClientRect();
+      _mouse.x = ((e.clientX - rect.left) / rect.width)  * 2 - 1;
+      _mouse.y = -((e.clientY - rect.top)  / rect.height) * 2 + 1;
+      _updateTooltip(e.clientX, e.clientY);
+    });
+
+    canvas.addEventListener('mouseleave', () => {
+      _hideTooltip();
+    });
+  }
+
+  function _registerAssetMesh(mesh, assetId, assetType) {
+    mesh.traverse(child => {
+      if (child.isMesh) {
+        child.userData.assetId = assetId;
+        child.userData.assetType = assetType;
+        _tooltipAssets.push(child);
+      }
+    });
+  }
+
+  function _updateTooltip(mouseX, mouseY) {
+    if (!_raycaster || !_camera || _tooltipAssets.length === 0) return;
+
+    _raycaster.setFromCamera(_mouse, _camera);
+    const intersects = _raycaster.intersectObjects(_tooltipAssets, false);
+
+    const tooltip = document.getElementById('asset-tooltip');
+    if (!tooltip) return;
+
+    if (intersects.length > 0) {
+      const hit = intersects[0].object;
+      const assetId = hit.userData.assetId;
+      const assetType = hit.userData.assetType;
+
+      if (assetId !== _hoveredAsset) {
+        _hoveredAsset = assetId;
+        const state = AirTwinState.get();
+
+        // Build tooltip content
+        const titleEl = document.getElementById('tooltip-title');
+        const statusEl = document.getElementById('tooltip-status');
+        const pm25El = document.getElementById('tooltip-pm25');
+        const fanEl = document.getElementById('tooltip-fan');
+
+        if (titleEl) {
+          const label = assetType === 'sensor' ? 'SDS011 · ' : 'STARKVIND · ';
+          titleEl.textContent = label + assetId;
+        }
+
+        if (statusEl) {
+          const status = state.asset_status || 'unknown';
+          statusEl.textContent = 'Status: ' + status.replace(/_/g, ' ');
+        }
+
+        if (pm25El) {
+          pm25El.textContent = state.pm25 != null ?
+            `PM2.5: ${state.pm25.toFixed(1)} µg/m³` : 'PM2.5: —';
+        }
+
+        if (fanEl) {
+          if (assetType === 'purifier') {
+            const mode = state.fan_mode || '—';
+            const speed = state.fan_speed || '—';
+            fanEl.textContent = `Fan: ${mode} · Step ${speed}`;
+          } else {
+            fanEl.textContent = `Sensor · ${state.regime?.toUpperCase() || '—'}`;
+          }
+        }
+      }
+
+      // Position tooltip near cursor
+      tooltip.classList.remove('hidden');
+      tooltip.style.left = `${mouseX + 16}px`;
+      tooltip.style.top  = `${mouseY - 8}px`;
+
+      // Keep tooltip on screen
+      const rect = tooltip.getBoundingClientRect();
+      if (rect.right > window.innerWidth - 8) {
+        tooltip.style.left = `${mouseX - rect.width - 16}px`;
+      }
+      if (rect.bottom > window.innerHeight - 8) {
+        tooltip.style.top = `${mouseY - rect.height - 8}px`;
+      }
+
+    } else {
+      _hideTooltip();
+    }
+  }
+
+  function _hideTooltip() {
+    _hoveredAsset = null;
+    const tooltip = document.getElementById('asset-tooltip');
+    if (tooltip) tooltip.classList.add('hidden');
+  }
+
 
   // ── GLB loader ──────────────────────────────────────────────
 

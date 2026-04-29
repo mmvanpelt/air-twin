@@ -1,279 +1,295 @@
+"""
+sds011_reader.py — SDS011 PM2.5 sensor reader with buffer fallback.
+
+Reads PM2.5 at 1Hz, qualifies readings, and publishes over MQTT.
+When the Windows backend MQTT broker is unreachable, writes to the
+local SQLite buffer instead. Syncs automatically when backend reconnects.
+
+Location: /home/pi/air-twin/pi/sds011_reader.py
+"""
+
 import serial
-import struct
 import time
 import json
-import math
 import logging
+import statistics
+import sys
 from collections import deque
 from datetime import datetime, timezone
+from pathlib import Path
+from enum import Enum
+
 import paho.mqtt.client as mqtt
-from paho.mqtt.enums import CallbackAPIVersion
 
-# --- Config ---
-SERIAL_PORT = "/dev/ttyUSB_SDS011"
-BAUD_RATE = 9600
-BROKER_HOST = "127.0.0.1"
-BROKER_PORT = 1883
-TOPIC_PM25 = "airtwin/sensor/pm25"
-READ_INTERVAL_SEC = 1
+# Add parent to path for buffer import
+sys.path.insert(0, str(Path(__file__).parent))
+import buffer as buf
 
-WARMUP_READINGS = 15
-ROLLING_WINDOW_SIZE = 300
-DELTA_MULTIPLIER = 4.0
-Z_SCORE_THRESHOLD = 4.0
-MIN_WINDOW_FILL = 60
-SENSOR_MIN = 0.0
-SENSOR_MAX = 999.9
-ABSOLUTE_FLOOR = 5.0
+# ---------------------------------------------------------------------------
+# Config
+# ---------------------------------------------------------------------------
 
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s %(levelname)s %(message)s"
-)
+SERIAL_PORT   = "/dev/ttyUSB_SDS011"
+BAUD_RATE     = 9600
+WARMUP_S      = 30
+WINDOW        = 60        # rolling window size
+BROKER_HOST   = "localhost"
+BROKER_PORT   = 1883
+TOPIC_PM25    = "airtwin/sensor/pm25"
+TOPIC_STATUS  = "airtwin/sensor/status"
+
+# Plausibility thresholds
+MAX_VALUE         = 999.9
+MAX_DELTA         = 150.0   # max change between readings
+SPIKE_STD_MULT    = 6.0     # readings > mean + N*std flagged
+
+# Backend heartbeat — if MQTT not connected, buffer mode activates
+BACKEND_HEARTBEAT_TOPIC  = "airtwin/backend/heartbeat"
+BACKEND_TIMEOUT_S        = 120  # 2 min without heartbeat → buffer mode
+
 log = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Plausibility
+# ---------------------------------------------------------------------------
 
-class WarmupFilter:
-    def __init__(self, warmup_count=WARMUP_READINGS):
-        self.warmup_count = warmup_count
-        self.count = 0
-        self.complete = False
-
-    def tick(self):
-        if self.complete:
-            return False
-        self.count += 1
-        if self.count <= self.warmup_count:
-            log.info(f"Warmup reading {self.count}/{self.warmup_count} — tagging, not discarding")
-            return True
-        self.complete = True
-        log.info("Warmup complete")
-        return False
+class PlausibilityReason(str, Enum):
+    OK              = "ok"
+    OUT_OF_RANGE    = "out_of_range"
+    DELTA_EXCEEDED  = "delta_exceeded"
+    SPIKE_DETECTED  = "spike_detected"
 
 
-class HardwareBoundsCheck:
-    def check(self, value):
-        if value < SENSOR_MIN or value > SENSOR_MAX:
-            log.warning(f"Hardware bounds exceeded: {value} µg/m³ — rejected")
-            return False
-        return True
+def check_plausibility(value: float, prev: float | None,
+                       mean: float | None, std: float | None) -> tuple[bool, str]:
+    if value < 0 or value > MAX_VALUE:
+        return False, PlausibilityReason.OUT_OF_RANGE
+
+    if prev is not None and abs(value - prev) > MAX_DELTA:
+        return False, PlausibilityReason.DELTA_EXCEEDED
+
+    if mean is not None and std is not None and std > 0:
+        if value > mean + SPIKE_STD_MULT * std:
+            return False, PlausibilityReason.SPIKE_DETECTED
+
+    return True, PlausibilityReason.OK
 
 
-class RollingWindow:
-    def __init__(self, size=ROLLING_WINDOW_SIZE):
-        self.size = size
-        self.window = deque(maxlen=size)
-        self.mean = 0.0
-        self.M2 = 0.0
-        self.count = 0
+# ---------------------------------------------------------------------------
+# Serial reader
+# ---------------------------------------------------------------------------
 
-    def add(self, value):
-        if len(self.window) == self.size:
-            old = self.window[0]
-            self.count -= 1
-            delta = old - self.mean
-            self.mean -= delta / self.count if self.count > 0 else 0
-            self.M2 -= delta * (old - self.mean)
-        self.window.append(value)
-        self.count += 1
-        delta = value - self.mean
-        self.mean += delta / self.count
-        delta2 = value - self.mean
-        self.M2 += delta * delta2
-
-    def get_stats(self):
-        if self.count < 2:
-            return self.mean, 0.0
-        variance = self.M2 / (self.count - 1)
-        std = math.sqrt(max(0.0, variance))
-        return self.mean, std
-
-    def filled(self):
-        return len(self.window) >= MIN_WINDOW_FILL
-
-
-class PlausibilityChecker:
-    def __init__(self, window: RollingWindow):
-        self.window = window
-
-    def check(self, value):
-        if not self.window.filled():
-            return True, "window_filling"
-        mean, std = self.window.get_stats()
-        delta = value - mean
-        if std > 0 and delta > DELTA_MULTIPLIER * std:
-            log.warning(f"Plausibility fail: {value} µg/m³ delta={delta:.2f} std={std:.2f}")
-            return False, "delta_exceeded"
-        return True, "ok"
-
-
-class TrendCalculator:
-    def __init__(self, window: RollingWindow):
-        self.window = window
-
-    def slope(self):
-        data = list(self.window.window)
-        n = len(data)
-        if n < 2:
-            return 0.0
-        x_mean = (n - 1) / 2.0
-        y_mean = sum(data) / n
-        numerator = sum((i - x_mean) * (data[i] - y_mean) for i in range(n))
-        denominator = sum((i - x_mean) ** 2 for i in range(n))
-        return numerator / denominator if denominator != 0 else 0.0
-
-
-def read_sds011(ser):
+def read_sds011(ser: serial.Serial) -> float | None:
+    """Read one PM2.5 value from SDS011 serial stream."""
+    data = []
     while True:
         byte = ser.read(1)
         if byte == b'\xaa':
-            frame = ser.read(9)
-            if len(frame) == 9 and frame[0] == 0xc0 and frame[8] == 0xab:
-                pm25_raw = struct.unpack('<H', frame[1:3])[0]
-                return round(pm25_raw / 10.0, 1)
-    return None
+            data = [0xaa]
+        elif data:
+            data.append(ord(byte))
+            if len(data) == 10:
+                if data[0] == 0xaa and data[1] == 0xc0 and data[9] == 0xab:
+                    pm25 = ((data[3] * 256) + data[2]) / 10.0
+                    return pm25
+                data = []
 
 
-def create_mqtt_client():
-    client = mqtt.Client(CallbackAPIVersion.VERSION2)
+# ---------------------------------------------------------------------------
+# MQTT client with buffer fallback
+# ---------------------------------------------------------------------------
 
-    def on_connect(client, userdata, flags, reason_code, properties):
+class BufferedPublisher:
+    """
+    MQTT publisher with automatic buffer fallback.
+
+    When the Windows backend is reachable, publishes directly over MQTT.
+    When unreachable (heartbeat timeout), writes to local SQLite buffer.
+    Automatically switches back to MQTT when backend reconnects.
+    """
+
+    def __init__(self):
+        self._connected = False
+        self._buffer_mode = False
+        self._last_heartbeat = 0.0
+        self._client = mqtt.Client(mqtt.CallbackAPIVersion.VERSION2,
+                                   client_id="sds011_reader")
+        self._client.on_connect    = self._on_connect
+        self._client.on_disconnect = self._on_disconnect
+        self._client.on_message    = self._on_message
+
+        buf.init_buffer()
+        log.info("BufferedPublisher initialised")
+
+    def connect(self):
+        self._client.connect(BROKER_HOST, BROKER_PORT, keepalive=60)
+        self._client.loop_start()
+
+    def _on_connect(self, client, userdata, flags, reason_code, properties):
         if reason_code == 0:
+            self._connected = True
             log.info("MQTT connected")
+            # Subscribe to backend heartbeat
+            client.subscribe(BACKEND_HEARTBEAT_TOPIC)
+            log.info(f"Subscribed to {BACKEND_HEARTBEAT_TOPIC}")
         else:
-            log.error(f"MQTT connection failed: {reason_code}")
+            log.warning(f"MQTT connect failed: {reason_code}")
 
-    def on_disconnect(client, userdata, flags, reason_code, properties):
-        log.warning(f"MQTT disconnected: {reason_code} — will retry")
+    def _on_disconnect(self, client, userdata, flags, reason_code, properties):
+        self._connected = False
+        log.warning("MQTT disconnected — activating buffer mode")
+        self._buffer_mode = True
 
-    client.on_connect = on_connect
-    client.on_disconnect = on_disconnect
-    client.reconnect_delay_set(min_delay=1, max_delay=60)
+    def _on_message(self, client, userdata, message):
+        if message.topic == BACKEND_HEARTBEAT_TOPIC:
+            self._last_heartbeat = time.time()
+            if self._buffer_mode:
+                log.info("Backend heartbeat received — switching back to MQTT mode")
+                self._buffer_mode = False
 
-    delay = 1
-    while True:
-        try:
-            client.connect(BROKER_HOST, BROKER_PORT, keepalive=60)
-            break
-        except Exception as e:
-            log.warning(f"MQTT connect failed: {e} — retrying in {delay}s")
-            time.sleep(delay)
-            delay = min(delay * 2, 60)
+    def _check_heartbeat(self):
+        """Activate buffer mode if backend heartbeat times out."""
+        if self._last_heartbeat == 0:
+            # Never received — give grace period on startup
+            if time.time() > WARMUP_S + BACKEND_TIMEOUT_S:
+                if not self._buffer_mode:
+                    log.warning("No backend heartbeat — activating buffer mode")
+                    self._buffer_mode = True
+            return
 
-    client.loop_start()
-    return client
+        elapsed = time.time() - self._last_heartbeat
+        if elapsed > BACKEND_TIMEOUT_S and not self._buffer_mode:
+            log.warning(f"Backend heartbeat timeout ({elapsed:.0f}s) — buffer mode")
+            self._buffer_mode = True
+
+    def publish(self, payload: dict):
+        """Publish reading to MQTT or buffer depending on backend availability."""
+        self._check_heartbeat()
+
+        if self._connected and not self._buffer_mode:
+            # Normal mode — publish over MQTT
+            try:
+                msg = json.dumps(payload)
+                self._client.publish(TOPIC_PM25, msg, qos=1)
+            except Exception as e:
+                log.error(f"MQTT publish failed: {e} — buffering")
+                buf.insert_reading(payload)
+        else:
+            # Buffer mode — write to local SQLite
+            buf.insert_reading(payload)
+            stats = buf.buffer_stats()
+            if stats["unsynced"] % 100 == 0:
+                log.info(f"Buffer mode: {stats['unsynced']} readings buffered")
+
+    def stop(self):
+        self._client.loop_stop()
+        self._client.disconnect()
 
 
-def open_serial(port, baud, retries=10, delay=5):
-    for attempt in range(1, retries + 1):
-        try:
-            ser = serial.Serial(port, baud, timeout=2)
-            log.info(f"Serial open on {port}")
-            return ser
-        except serial.SerialException as e:
-            log.warning(f"Serial open failed (attempt {attempt}/{retries}): {e} — retrying in {delay}s")
-            time.sleep(delay)
-    raise RuntimeError(f"Could not open {port} after {retries} attempts")
-
+# ---------------------------------------------------------------------------
+# Main loop
+# ---------------------------------------------------------------------------
 
 def main():
-    log.info("Starting sds011_reader.py")
+    logging.basicConfig(
+        level=logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
 
-    warmup = WarmupFilter()
-    bounds = HardwareBoundsCheck()
-    window = RollingWindow()
-    plausibility = PlausibilityChecker(window)
-    trend = TrendCalculator(window)
-    mqtt_client = create_mqtt_client()
-    last_published_value = None
+    log.info(f"Opening serial port {SERIAL_PORT}")
+    try:
+        ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=2)
+    except serial.SerialException as e:
+        log.error(f"Serial port error: {e}")
+        sys.exit(1)
+
+    publisher = BufferedPublisher()
+    publisher.connect()
+
+    # Rolling window state
+    window: deque = deque(maxlen=WINDOW)
+    prev_value: float | None = None
+    start_time = time.time()
+    reading_count = 0
+
+    log.info(f"Warming up for {WARMUP_S}s...")
 
     while True:
         try:
-            ser = open_serial(SERIAL_PORT, BAUD_RATE)
-            buffer_flushed = False
-            while True:
-                start = time.time()
+            value = read_sds011(ser)
+            if value is None:
+                continue
 
-                try:
-                    value = read_sds011(ser)
-                except Exception as e:
-                    log.error(f"Serial read error: {e} — reopening port")
-                    ser.close()
-                    break
+            reading_count += 1
+            elapsed = time.time() - start_time
+            is_warmup = elapsed < WARMUP_S
 
-                if value is None:
-                    log.warning("Failed to read from SDS011")
-                    time.sleep(READ_INTERVAL_SEC)
-                    continue
+            # Rolling stats
+            window.append(value)
+            rolling_mean = statistics.mean(window) if len(window) > 1 else value
+            rolling_std  = statistics.stdev(window) if len(window) > 1 else 0.0
+            trend_slope  = None
 
-                # Hardware bounds — only hard reject
-                if not bounds.check(value):
-                    time.sleep(READ_INTERVAL_SEC)
-                    continue
+            if len(window) >= 10:
+                n = len(window)
+                xs = list(range(n))
+                ys = list(window)
+                x_mean = sum(xs) / n
+                y_mean = sum(ys) / n
+                num = sum((x - x_mean) * (y - y_mean) for x, y in zip(xs, ys))
+                den = sum((x - x_mean) ** 2 for x in xs)
+                trend_slope = num / den if den != 0 else 0.0
 
-                in_warmup = warmup.tick()
+            # Plausibility
+            mean_for_check = rolling_mean if len(window) > 5 else None
+            std_for_check  = rolling_std  if len(window) > 5 else None
+            is_plausible, reason = check_plausibility(
+                value, prev_value, mean_for_check, std_for_check
+            )
 
-                # Flush stale serial buffer once, immediately after warmup completes
-                if not in_warmup and not buffer_flushed:
-                    ser.reset_input_buffer()
-                    buffer_flushed = True
-                    log.info("Serial buffer flushed — first real reading incoming")
+            # Changed flag
+            changed = prev_value is None or abs(value - prev_value) >= 0.1
 
-                # Changed flag — has value moved since last publish
-                changed = (last_published_value is None or value != last_published_value)
-                last_published_value = value
+            ts = datetime.now(timezone.utc).isoformat()
 
-                # Warmup readings — publish tagged, do not feed rolling window
-                if in_warmup:
-                    payload = {
-                        "value": value,
-                        "timestamp": datetime.now(timezone.utc).isoformat(),
-                        "is_warmup": True,
-                        "changed": changed,
-                        "is_plausible": None,
-                        "plausibility_reason": "warmup",
-                        "rolling_mean": None,
-                        "rolling_std": None,
-                        "trend_slope": None,
-                        "purifier_on": None,
-                        "fan_speed": None,
-                    }
-                    mqtt_client.publish(TOPIC_PM25, json.dumps(payload))
-                    log.info(f"Published (warmup): {payload}")
-                    elapsed = time.time() - start
-                    time.sleep(max(0, READ_INTERVAL_SEC - elapsed))
-                    continue
+            payload = {
+                "timestamp":           ts,
+                "value":               round(value, 1),
+                "is_warmup":           int(is_warmup),
+                "changed":             int(changed),
+                "is_plausible":        int(is_plausible),
+                "plausibility_reason": reason,
+                "rolling_mean":        round(rolling_mean, 3),
+                "rolling_std":         round(rolling_std, 3),
+                "trend_slope":         round(trend_slope, 6) if trend_slope is not None else None,
+                "purifier_on":         None,
+                "fan_speed":           None,
+                "fan_mode":            None,
+                "filter_age":          None,
+                "filter_age_unit":     "minutes",
+                "device_age":          None,
+                "device_age_unit":     "minutes",
+                "pm25_internal":       None,
+                "control_source":      None,
+            }
 
-                # Operational readings
-                is_plausible, plausibility_reason = plausibility.check(value)
-                rolling_mean, rolling_std = window.get_stats()
-                trend_slope = trend.slope()
+            if not is_warmup:
+                publisher.publish(payload)
 
-                window.add(value)
+            prev_value = value
+            time.sleep(1)
 
-                payload = {
-                    "value": value,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                    "is_warmup": False,
-                    "changed": changed,
-                    "is_plausible": is_plausible,
-                    "plausibility_reason": plausibility_reason,
-                    "rolling_mean": round(rolling_mean, 2),
-                    "rolling_std": round(rolling_std, 2),
-                    "trend_slope": round(trend_slope, 4),
-                    "purifier_on": None,
-                    "fan_speed": None,
-                }
-
-                mqtt_client.publish(TOPIC_PM25, json.dumps(payload))
-                log.info(f"Published: {payload}")
-
-                elapsed = time.time() - start
-                time.sleep(max(0, READ_INTERVAL_SEC - elapsed))
-
-        except RuntimeError as e:
-            log.error(f"Fatal serial error: {e} — retrying in 60s")
-            time.sleep(60)
+        except serial.SerialException as e:
+            log.error(f"Serial error: {e}")
+            time.sleep(5)
+        except KeyboardInterrupt:
+            log.info("Stopping")
+            publisher.stop()
+            ser.close()
+            sys.exit(0)
+        except Exception as e:
+            log.error(f"Unexpected error: {e}")
+            time.sleep(1)
 
 
 if __name__ == "__main__":

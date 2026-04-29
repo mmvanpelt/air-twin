@@ -6,7 +6,7 @@
   <title>Air Twin — Digital Twin</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Space+Mono:wght@400;700&family=DM+Sans:wght@300;400;500&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;1,9..40,300&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
   <link rel="stylesheet" href="css/style.css">
 </head>
 <body>
@@ -26,9 +26,9 @@
 
     <nav class="role-tabs" id="role-tabs">
       <button class="tab active" data-role="operator">OPERATOR</button>
-      <button class="tab" data-role="executive">EXECUTIVE</button>
-      <button class="tab" data-role="engineer">ENGINEER</button>
       <button class="tab" data-role="technician">TECHNICIAN</button>
+      <button class="tab" data-role="engineer">ENGINEER</button>
+      <button class="tab" data-role="executive">EXECUTIVE</button>
     </nav>
 
     <div class="header-right">
@@ -100,29 +100,58 @@
 
       <!-- ── EXECUTIVE view ─────────────────────────────────── -->
       <div class="role-view" data-role="executive">
+
         <div class="hud-section">
+          <div class="exec-status-label">AIR QUALITY</div>
           <div class="exec-conclusion" id="exec-conclusion">—</div>
         </div>
+
+        <div class="hud-section">
+          <div class="section-title">ASSET STATUS</div>
+          <div class="exec-asset-status" id="exec-asset-status">—</div>
+          <div class="exec-asset-meta" id="exec-asset-meta">—</div>
+        </div>
+
+        <div class="hud-section">
+          <div class="section-title">MONTHLY COSTS</div>
+          <div class="exec-cost-grid">
+            <div class="exec-cost-row">
+              <span>Energy</span>
+              <span id="exec-cost-energy">—</span>
+            </div>
+            <div class="exec-cost-row">
+              <span>Filter (monthly)</span>
+              <span id="exec-cost-filter">—</span>
+            </div>
+            <div class="exec-cost-row exec-cost-total">
+              <span>Total</span>
+              <span id="exec-cost-total">—</span>
+            </div>
+            <div class="exec-cost-row">
+              <span>Annual estimate</span>
+              <span id="exec-cost-annual">—</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="hud-section">
+          <div class="section-title">SERVICE LEVEL</div>
+          <div class="exec-service-wrap">
+            <div class="filter-bar-track">
+              <div class="filter-bar-fill" id="exec-service-bar"></div>
+            </div>
+            <span class="filter-pct" id="exec-service-pct">—%</span>
+          </div>
+          <div class="exec-row-small" id="exec-service-label">—</div>
+        </div>
+
         <div class="hud-section">
           <div class="section-title">REQUIRED ACTIONS</div>
           <div class="action-list" id="exec-actions">
             <div class="action-empty">No actions required</div>
           </div>
         </div>
-        <div class="hud-section exec-meta">
-          <div class="exec-meta-row">
-            <span class="exec-meta-label">Confidence</span>
-            <span class="exec-meta-value" id="exec-confidence">—</span>
-          </div>
-          <div class="exec-meta-row">
-            <span class="exec-meta-label">Regime</span>
-            <span class="exec-meta-value" id="exec-regime">—</span>
-          </div>
-          <div class="exec-meta-row">
-            <span class="exec-meta-label">Baseline</span>
-            <span class="exec-meta-value" id="exec-baseline">—</span>
-          </div>
-        </div>
+
       </div>
 
       <!-- ── ENGINEER view ──────────────────────────────────── -->
@@ -157,6 +186,26 @@
             <div class="bl-row"><span>Room REF</span><span id="eng-ref">—</span></div>
             <div class="bl-row"><span>Filter age</span><span id="eng-filter-age">—</span></div>
             <div class="bl-row"><span>Filter life</span><span id="eng-filter-life">—%</span></div>
+            <div class="bl-row"><span>Asset status</span><span id="eng-asset-status">—</span></div>
+            <div class="bl-row"><span>Service level</span><span id="eng-service-level">—</span></div>
+          </div>
+        </div>
+
+        <div class="hud-section">
+          <div class="section-title">ASSET LIFE</div>
+          <div class="perf-grid">
+            <div class="bl-row"><span>Life remaining</span><span id="eng-device-life-pct">—%</span></div>
+            <div class="bl-row"><span>Est. years left</span><span id="eng-device-years">—</span></div>
+          </div>
+        </div>
+
+        <div class="hud-section">
+          <div class="section-title">OPERATING COSTS</div>
+          <div class="perf-grid">
+            <div class="bl-row"><span>Energy/month</span><span id="eng-cost-energy">—</span></div>
+            <div class="bl-row"><span>Filter/month</span><span id="eng-cost-filter">—</span></div>
+            <div class="bl-row"><span>Total/month</span><span id="eng-cost-total">—</span></div>
+            <div class="bl-row"><span>kWh/month</span><span id="eng-cost-kwh">—</span></div>
           </div>
         </div>
       </div>
@@ -168,6 +217,18 @@
           <div class="action-list" id="tech-actions">
             <div class="action-empty">No pending actions</div>
           </div>
+        </div>
+
+        <div class="hud-section">
+          <div class="section-title">FILTER STATUS</div>
+          <div class="filter-bar-wrap">
+            <div class="filter-bar-track">
+              <div class="filter-bar-fill" id="tech-filter-bar"></div>
+            </div>
+            <span class="filter-pct" id="tech-filter-pct">—%</span>
+          </div>
+          <div class="exec-row-small" id="tech-filter-weeks">—</div>
+          <div class="exec-row-small" id="tech-filter-cost">—</div>
         </div>
 
         <div class="hud-section">

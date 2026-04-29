@@ -356,7 +356,20 @@ class TwinEngine:
         except Exception as e:
             logger.error(f"Database persistence error: {e}")
 
-        # --- Step 10: Write twin_state.json ---
+        # --- Step 10: Derive asset status and costs ---
+        asset_status = self._derive_asset_status(reading)
+        service_level = self._derive_service_level()
+        monthly_kwh, monthly_cost = self._derive_monthly_cost(reading)
+        from dataclasses import replace as _r
+        self._state = _r(
+            self._state,
+            asset_status=asset_status,
+            service_level_compliance_pct=service_level,
+            monthly_energy_kwh=monthly_kwh,
+            monthly_cost_usd=monthly_cost,
+        )
+
+        # --- Step 11: Write twin_state.json ---
         self._save_state()
 
         # --- Step 11: Notify FastAPI ---
@@ -487,6 +500,108 @@ class TwinEngine:
     # ---------------------------------------------------------------------------
     # Internal — MQTT command publishing
     # ---------------------------------------------------------------------------
+
+    def _derive_asset_status(self, reading: Reading) -> str:
+        """
+        Derive asset operational status — separate from environment regime.
+
+        Asset status reflects the purifier device health and behaviour,
+        not the air quality in the room. A purifier can be RESPONDING
+        (working hard during an event) while the environment is DEGRADED.
+        These are independent concerns.
+        """
+        from dataclasses import replace as _r
+
+        # Check filter life
+        filter_life = self._state.filter_status if hasattr(self._state, 'filter_status') else None
+        if filter_life and getattr(filter_life, 'replacement_due', False):
+            return "filter_due"
+
+        # Check if purifier is online
+        if reading.purifier_on is False:
+            return "offline"
+
+        if reading.purifier_on is None:
+            return "unknown"
+
+        # Check if actively responding to an event
+        regime = self._state.current_regime
+        if str(regime).lower().replace("regimetype.", "") in ("event", "degraded"):
+            if reading.fan_speed and reading.fan_speed > 1:
+                return "responding"
+
+        # Check performance ratio if available
+        perf_counts = self._state.performance_observation_counts
+        if perf_counts and any(v > 3 for v in perf_counts.values()):
+            # Enough observations — check empirical CADR
+            empirical = self._state.empirical_cadr_auto_m3h or {}
+            if empirical:
+                ratios = []
+                for speed, cadr in empirical.items():
+                    if cadr is not None and cadr > 0:
+                        from backend.twin_engine.loader import get_device_profile
+                        profile = get_device_profile(self._profile.device_id
+                                                     if hasattr(self._profile, 'device_id')
+                                                     else "ikea_starkvind_e2007",
+                                                     ROOT / "assets" / "device_profiles.json")
+                        # Compare against expected — simplified check
+                        ratios.append(cadr)
+                if ratios and max(ratios) < 50:  # very low empirical CADR
+                    return "performance_low"
+
+        return "operating_normally"
+
+    def _derive_service_level(self) -> float:
+        """
+        Calculate rolling 30-day service level compliance.
+        Returns percentage of readings below pm25 threshold.
+        """
+        try:
+            threshold = self._config.get("service_level", {}).get(
+                "pm25_threshold_ug_m3", 12.0
+            )
+            window_days = self._config.get("service_level", {}).get(
+                "rolling_window_days", 30
+            )
+            from datetime import datetime, timezone, timedelta
+            import sqlite3
+            cutoff = (datetime.now(timezone.utc) - timedelta(days=window_days)).isoformat()
+
+            # Query DB for compliance
+            if self._db_conn:
+                row = self._db_conn.execute("""
+                    SELECT
+                        COUNT(*) as total,
+                        SUM(CASE WHEN value <= ? THEN 1 ELSE 0 END) as compliant
+                    FROM raw_readings
+                    WHERE ts >= ? AND is_plausible = 1
+                """, (threshold, cutoff)).fetchone()
+                if row and row['total'] > 0:
+                    return round(100.0 * row['compliant'] / row['total'], 1)
+        except Exception:
+            pass
+        return 100.0
+
+    def _derive_monthly_cost(self, reading: Reading) -> tuple[float, float]:
+        """
+        Estimate monthly energy usage and cost from current fan speed.
+        Returns (monthly_kwh, monthly_cost_usd).
+        """
+        try:
+            rate = self._config.get("electricity_rate_usd_per_kwh", 0.13)
+            power_map = self._profile.power_watts_by_speed if hasattr(
+                self._profile, 'power_watts_by_speed') else {}
+            mode = reading.fan_mode or "auto"
+            speed = str(reading.fan_speed or 1)
+            mode_map = power_map.get(mode, power_map.get("auto", {}))
+            watts = float(mode_map.get(speed, 5))
+            # Assume 24h/day operation
+            monthly_kwh = round(watts * 24 * 30 / 1000, 2)
+            monthly_cost = round(monthly_kwh * rate, 2)
+            return monthly_kwh, monthly_cost
+        except Exception:
+            return 0.0, 0.0
+
 
     def _maybe_command_speed(self, reading: Reading, spike_active: bool) -> None:
         """

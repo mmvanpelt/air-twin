@@ -98,6 +98,13 @@ def _confidence_conclusion(regime: str, confidence: float) -> str:
     return 'Insufficient confidence to assess. Baseline re-establishment required.'
 
 
+def _normalise_regime(raw: str) -> str:
+    """Normalise regime string from Python enum repr to clean lowercase."""
+    if not raw:
+        return 'initialising'
+    return str(raw).lower().replace('regimetype.', '').strip()
+
+
 def enrich_frames(frames: list[dict], transitions: list[dict]) -> list[dict]:
     """
     Enrich raw sensor frames with twin state fields:
@@ -174,7 +181,7 @@ def enrich_frames(frames: list[dict], transitions: list[dict]) -> list[dict]:
 
         enriched_frame = {
             **frame,
-            'regime': regime,
+            'regime': _normalise_regime(regime),
             'confidence': round(confidence, 3),
             'confidence_conclusion': _confidence_conclusion(regime, confidence),
             'baseline_locked': baseline_locked,

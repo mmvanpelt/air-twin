@@ -43,6 +43,71 @@ logger = logging.getLogger(__name__)
 # Public — main entry point
 # ---------------------------------------------------------------------------
 
+
+def _asset_health_brief(state: TwinState, profile: dict) -> dict:
+    """
+    Generate asset health section for executive brief.
+    Returns dict with health, filter, costs, service_level.
+    """
+    device = profile.get("devices", {}).get("ikea_starkvind_e2007", {})
+    consumables = device.get("consumables", {})
+    device_life_hours = device.get("device_life_hours", 26280)
+
+    # Filter life
+    filter_type = state.installed_filter_type or "particle_only"
+    filter_key = "particle_and_gas_filter" if "gas" in filter_type else "particle_filter"
+    filter_info = consumables.get(filter_key, {})
+    filter_life_hours = filter_info.get("life_hours", 4380)
+    filter_cost = filter_info.get("replacement_cost_usd", {"low": 15, "high": 25})
+
+    filter_age_hours = (state.last_known_filter_age or 0) / 60
+    filter_remaining_pct = max(0, 100 - (filter_age_hours / filter_life_hours * 100))
+    filter_remaining_hours = max(0, filter_life_hours - filter_age_hours)
+    filter_remaining_weeks = round(filter_remaining_hours / (24 * 7), 0)
+
+    # Device life
+    device_age_hours = filter_age_hours  # approximate
+    device_life_remaining_pct = max(0, 100 - (device_age_hours / device_life_hours * 100))
+    device_years_remaining = max(0, (device_life_hours - device_age_hours) / 8760)
+
+    # Monthly costs
+    monthly_energy_cost = state.monthly_cost_usd
+    filter_monthly_cost = round(
+        ((filter_cost["low"] + filter_cost["high"]) / 2) / (filter_life_hours / (24 * 30)), 2
+    )
+    total_monthly = round(monthly_energy_cost + filter_monthly_cost, 2)
+
+    # Service level
+    compliance = state.service_level_compliance_pct
+    service_met = compliance >= 95.0
+
+    return {
+        "asset_status": state.asset_status,
+        "filter": {
+            "type": filter_type.replace("_", " "),
+            "life_remaining_pct": round(filter_remaining_pct, 0),
+            "weeks_to_replacement": int(filter_remaining_weeks),
+            "replacement_cost_low": filter_cost["low"],
+            "replacement_cost_high": filter_cost["high"],
+        },
+        "device": {
+            "life_remaining_pct": round(device_life_remaining_pct, 0),
+            "years_remaining": round(device_years_remaining, 1),
+        },
+        "costs": {
+            "energy_monthly_usd": round(monthly_energy_cost, 2),
+            "filter_monthly_usd": filter_monthly_cost,
+            "total_monthly_usd": total_monthly,
+            "total_annual_usd": round(total_monthly * 12, 2),
+        },
+        "service_level": {
+            "compliance_pct": compliance,
+            "target_pct": 95.0,
+            "met": service_met,
+        },
+    }
+
+
 def generate(
     state: TwinState,
     device_age_minutes: Optional[int] = None,

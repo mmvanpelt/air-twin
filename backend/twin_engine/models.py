@@ -228,6 +228,15 @@ class TwinState:
     performance_observation_counts:      dict = field(default_factory=dict)
     # { "manual": {"1": int, ..., "5": int}, "auto": {"1": int, ..., "9": int} }
 
+    # --- Asset status ---
+    # Derived each cycle — separate from environment regime
+    # operating_normally | responding | performance_low | filter_due | offline | unknown
+    asset_status:               str = "unknown"
+    service_level_compliance_pct: float = 100.0
+    # Fraction of readings in rolling window below pm25 threshold
+    monthly_energy_kwh:         float = 0.0
+    monthly_cost_usd:           float = 0.0
+
     # --- Control ---
     last_fan_speed_commanded:   Optional[int] = None
     last_fan_mode:              Optional[str] = None
@@ -306,6 +315,11 @@ class TwinState:
             "empirical_cadr_m3h":              self.empirical_cadr_m3h,
             "empirical_cadr_auto_m3h":         self.empirical_cadr_auto_m3h,
             "performance_observation_counts":  self.performance_observation_counts,
+            # Asset status
+            "asset_status":               self.asset_status,
+            "service_level_compliance_pct": self.service_level_compliance_pct,
+            "monthly_energy_kwh":         self.monthly_energy_kwh,
+            "monthly_cost_usd":           self.monthly_cost_usd,
             # Control
             "last_fan_speed_commanded":   self.last_fan_speed_commanded,
             "last_fan_mode":              self.last_fan_mode,
@@ -387,6 +401,11 @@ class TwinState:
             empirical_cadr_m3h=get("empirical_cadr_m3h", {}),
             empirical_cadr_auto_m3h=get("empirical_cadr_auto_m3h", {}),
             performance_observation_counts=get("performance_observation_counts", {}),
+            # Asset status
+            asset_status=get("asset_status", "unknown"),
+            service_level_compliance_pct=get("service_level_compliance_pct", 100.0),
+            monthly_energy_kwh=get("monthly_energy_kwh", 0.0),
+            monthly_cost_usd=get("monthly_cost_usd", 0.0),
             # Control
             last_fan_speed_commanded=get("last_fan_speed_commanded"),
             last_fan_mode=get("last_fan_mode"),
