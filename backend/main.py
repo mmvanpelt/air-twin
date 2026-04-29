@@ -353,6 +353,10 @@ async def lifespan(app: FastAPI):
     subscriber = EnginedSubscriber(_engine)
     subscriber.start()
     log.info("MQTT subscriber started")
+    from backend.buffer_sync import BufferSyncThread
+    _buffer_sync_thread = BufferSyncThread(_db_conn, _publish_client)
+    _buffer_sync_thread.start()
+    log.info("Buffer sync thread started")
 
     yield
 
@@ -361,6 +365,7 @@ async def lifespan(app: FastAPI):
     subscriber.stop()
     _mqtt_client.loop_stop()
     _mqtt_client.disconnect()
+    _buffer_sync_thread.stop()
     if _db_conn:
         _db_conn.close()
 
