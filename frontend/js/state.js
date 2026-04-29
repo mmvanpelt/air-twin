@@ -98,6 +98,16 @@ const AirTwinState = (() => {
       // Compact WebSocket frame (from engine._public_state)
       _state = {
         ..._state,
+        asset_health: frame.asset_health || _state.asset_health,
+        baseline_std: frame.baseline_std ?? _state.baseline_std,
+        baseline_locked_season: frame.baseline_locked_season || _state.baseline_locked_season,
+        last_known_filter_age: frame.last_known_filter_age ?? _state.last_known_filter_age,
+        installed_filter_type: frame.installed_filter_type || _state.installed_filter_type,
+        filter_change_pending_reset: frame.filter_change_pending_reset ?? _state.filter_change_pending_reset,
+        asset_status: frame.asset_status || _state.asset_status,
+        service_level_compliance_pct: frame.service_level_compliance_pct ?? _state.service_level_compliance_pct,
+        monthly_energy_kwh: frame.monthly_energy_kwh ?? _state.monthly_energy_kwh,
+        monthly_cost_usd: frame.monthly_cost_usd ?? _state.monthly_cost_usd,
         ts: frame.ts || _state.ts,
         pm25: frame.pm25 ?? frame.value ?? _state.pm25,
         pm25_internal: frame.pm25_internal ?? _state.pm25_internal,

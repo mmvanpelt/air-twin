@@ -356,6 +356,11 @@ class TwinEngine:
         except Exception as e:
             logger.error(f"Database persistence error: {e}")
 
+        # Store device_age from Zigbee reading into TwinState each cycle
+        if reading.device_age is not None:
+            from dataclasses import replace as _r
+            self._state = _r(self._state, last_known_device_age=reading.device_age)
+
         # --- Step 10: Derive asset status and costs ---
         asset_status = self._derive_asset_status(reading)
         service_level = self._derive_service_level()
@@ -375,10 +380,7 @@ class TwinEngine:
         # --- Step 11: Notify FastAPI ---
         if self._state_callback is not None:
             try:
-                asyncio.get_event_loop().call_soon_threadsafe(
-                    asyncio.ensure_future,
-                    self._state_callback(self._public_state(reading)),
-                )
+                self._state_callback(self._public_state(reading))
             except Exception as e:
                 logger.debug(f"State callback error (non-fatal): {e}")
 
@@ -554,15 +556,34 @@ class TwinEngine:
     def _derive_service_level(self) -> float:
         """
         Calculate rolling 30-day service level compliance.
+        Reads SLA from asset_registry.json if defined at commissioning.
+        Falls back to config.json service_level_defaults.
         Returns percentage of readings below pm25 threshold.
         """
         try:
-            threshold = self._config.get("service_level", {}).get(
-                "pm25_threshold_ug_m3", 12.0
-            )
-            window_days = self._config.get("service_level", {}).get(
-                "rolling_window_days", 30
-            )
+            # Read SLA from asset registry (deployment-specific)
+            from backend.twin_engine.loader import get_asset
+            asset = get_asset(self._asset_id,
+                              Path(__file__).parent.parent.parent / "data" / "asset_registry.json")
+            sla = getattr(asset, "service_level_agreement", None) or {}
+            if not sla:
+                # Try loading directly from registry dict
+                import json as _json
+                registry_path = Path(__file__).parent.parent.parent / "data" / "asset_registry.json"
+                with open(registry_path, encoding="utf-8") as _f:
+                    registry = _json.load(_f)
+                sla = registry.get("assets", {}).get(
+                    self._asset_id, {}
+                ).get("service_level_agreement", {})
+
+            # Fall back to config defaults if no SLA defined
+            defaults = self._config.get("service_level_defaults",
+                       self._config.get("service_level", {}))
+
+            threshold = sla.get("pm25_threshold_ug_m3",
+                        defaults.get("pm25_threshold_ug_m3", 12.0))
+            window_days = sla.get("rolling_window_days",
+                         defaults.get("rolling_window_days", 30))
             from datetime import datetime, timezone, timedelta
             import sqlite3
             cutoff = (datetime.now(timezone.utc) - timedelta(days=window_days)).isoformat()
@@ -936,8 +957,13 @@ class TwinEngine:
             "regime": self._state.current_regime,
             "confidence": self._state.confidence,
             "confidence_conclusion": confidence.confidence_conclusion(
-                self._state.confidence
+                self._state.confidence,
+                regime=str(self._state.current_regime).lower().replace("regimetype.", "")
             ),
+            "asset_status": self._state.asset_status,
+            "service_level_compliance_pct": self._state.service_level_compliance_pct,
+            "monthly_energy_kwh": self._state.monthly_energy_kwh,
+            "monthly_cost_usd": self._state.monthly_cost_usd,
             "baseline_locked": self._state.baseline_locked,
             "baseline_current": self._state.baseline_current,
             "fan_speed": reading.fan_speed,
@@ -948,4 +974,13 @@ class TwinEngine:
             "regime_summary": regime.regime_summary(self._state),
             "room_efficiency_factor": self._state.room_efficiency_factor,
             "commissioned_at": self._state.commissioned_at,
+            "baseline_std": self._state.baseline_std,
+            "baseline_locked_season": self._state.baseline_locked_season,
+            "last_known_filter_age": self._state.last_known_filter_age,
+            "installed_filter_type": str(self._state.installed_filter_type).lower().replace("filtertype.", ""),
+            "filter_change_pending_reset": self._state.filter_change_pending_reset,
+            "asset_status": self._state.asset_status,
+            "service_level_compliance_pct": self._state.service_level_compliance_pct,
+            "monthly_energy_kwh": self._state.monthly_energy_kwh,
+            "monthly_cost_usd": self._state.monthly_cost_usd,
         }

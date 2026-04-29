@@ -35,7 +35,16 @@
       },
       "commissioned_at": "2026-04-26T18:18:38.065714+00:00",
       "_commissioned_comment": "ISO8601 timestamp of first successful twin engine reading. Populated automatically by twin engine on first run.",
-      "notes": "Zigbee dongle firmware updated to 8.0.2 before pairing. Factory firmware 7.4.5 would not pair with this device. Pairing button located inside unit behind front panel \u2014 not the external knob."
+      "notes": "Zigbee dongle firmware updated to 8.0.2 before pairing. Factory firmware 7.4.5 would not pair with this device. Pairing button located inside unit behind front panel \u2014 not the external knob.",
+      "service_level_agreement": {
+        "pm25_threshold_ug_m3": 12.0,
+        "compliance_target_pct": 95.0,
+        "rolling_window_days": 30,
+        "description": "Maintain PM2.5 below WHO guideline for 95% of operating hours",
+        "commissioned_by": "technician",
+        "review_date": null,
+        "_comment": "SLA defined at commissioning \u2014 deployment specific, not device generic"
+      }
     },
     "sds011_01": {
       "asset_type": "sensor",

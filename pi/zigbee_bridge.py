@@ -102,6 +102,26 @@ def create_client():
 def main():
     log.info("Starting zigbee_bridge.py")
     client = create_client()
+
+    import threading
+
+    def poll_device_age():
+        """Poll device_age every 5 minutes — custom cluster, not auto-reported."""
+        while True:
+            time.sleep(300)
+            try:
+                client.publish(
+                    "zigbee2mqtt/starkvind/get",
+                    json.dumps({"device_age": ""}),
+                )
+                log.debug("Polled device_age")
+            except Exception as e:
+                log.warning(f"device_age poll failed: {e}")
+
+    poll_thread = threading.Thread(target=poll_device_age, daemon=True)
+    poll_thread.start()
+    log.info("device_age polling started (every 5 min)")
+
     client.loop_forever()
  
  

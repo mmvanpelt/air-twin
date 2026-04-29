@@ -43,6 +43,7 @@ const AirTwinMode = (() => {
   }
 
   function seek(frameIndex) {
+    if (_mode !== 'demo') return;
     _frameIndex = Math.max(0, Math.min(frameIndex, (_recording?.frames?.length ?? 1) - 1));
     if (_recording?.frames?.[_frameIndex]) {
       AirTwinState.update(_recording.frames[_frameIndex]);
@@ -81,6 +82,9 @@ const AirTwinMode = (() => {
         _ws.onopen = () => {
           clearTimeout(timeout);
           _setMode('live');
+          _fetchBrief();
+          if (window._briefInterval) clearInterval(window._briefInterval);
+          window._briefInterval = setInterval(_fetchBrief, 15000);
           resolve(true);
         };
 
@@ -115,6 +119,19 @@ const AirTwinMode = (() => {
         resolve(false);
       }
     });
+  }
+
+  async function _fetchBrief() {
+    try {
+      const resp = await fetch('http://localhost:8000/brief/executive');
+      const data = await resp.json();
+      if (data.asset_health) window._lastAssetHealth = data.asset_health;
+      if (data.required_actions) window._lastExecutiveActions = data.required_actions;
+      const state = AirTwinState.get();
+      state.asset_health = data.asset_health;
+      state.executive_actions = data.required_actions;
+      AirTwinState.update(state);
+    } catch(e) {}
   }
 
   function switchToDemo() {
@@ -336,7 +353,15 @@ const AirTwinMode = (() => {
     }
   }
 
-  return { init, seek, togglePlay, setSpeed, switchToLive, switchToDemo };
+  // Expose fetchBrief for external triggering
+  function fetchBriefNow() { _fetchBrief(); }
+
+  // Auto-fetch brief every 15s regardless of interval setup
+  setInterval(() => {
+    if (_mode === 'live') _fetchBrief();
+  }, 15000);
+
+  return { init, seek, togglePlay, setSpeed, switchToLive, switchToDemo, fetchBriefNow };
 })();
 
 // Boot on DOM ready

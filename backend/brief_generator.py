@@ -66,7 +66,22 @@ def _asset_health_brief(state: TwinState, profile: dict) -> dict:
     filter_remaining_weeks = round(filter_remaining_hours / (24 * 7), 0)
 
     # Device life
-    device_age_hours = filter_age_hours  # approximate
+    # Device age -- non-resettable total runtime
+    # Priority: Zigbee device_age > commissioned_at elapsed > filter_age
+    if getattr(state, 'last_known_device_age', None):
+        device_age_hours = round(state.last_known_device_age / 60, 1)
+    elif state.commissioned_at:
+        from datetime import datetime, timezone
+        try:
+            commissioned = datetime.fromisoformat(
+                state.commissioned_at.replace('Z', '+00:00')
+            )
+            elapsed = (datetime.now(timezone.utc) - commissioned).total_seconds()
+            device_age_hours = round(elapsed / 3600, 1)
+        except Exception:
+            device_age_hours = filter_age_hours
+    else:
+        device_age_hours = filter_age_hours
     device_life_remaining_pct = max(0, 100 - (device_age_hours / device_life_hours * 100))
     device_years_remaining = max(0, (device_life_hours - device_age_hours) / 8760)
 
@@ -93,6 +108,8 @@ def _asset_health_brief(state: TwinState, profile: dict) -> dict:
         "device": {
             "life_remaining_pct": round(device_life_remaining_pct, 0),
             "years_remaining": round(device_years_remaining, 1),
+            "age_hours": device_age_hours,
+            "life_hours_total": device_life_hours,
         },
         "costs": {
             "energy_monthly_usd": round(monthly_energy_cost, 2),
@@ -153,8 +170,19 @@ def generate(
         filter_life_hours=filter_life_hours,
     )
 
+    # Asset health for executive view
+    try:
+        from pathlib import Path as _Path
+        import json as _json
+        _profile_path = _Path(__file__).parent.parent / 'assets' / 'device_profiles.json'
+        with open(_profile_path, encoding='utf-8') as _f:
+            _profile_data = _json.load(_f)
+    except Exception:
+        _profile_data = {'devices': {}}
+    asset_health = _asset_health_brief(state, _profile_data)
+
     return {
-        "executive": _executive_view(conclusion, required_actions),
+        "executive": _executive_view(conclusion, required_actions, asset_health),
         "operator":  _operator_view(
             conclusion, required_actions, filter_status, open_alerts or []
         ),
@@ -177,16 +205,19 @@ def generate(
 # Role views
 # ---------------------------------------------------------------------------
 
-def _executive_view(conclusion: str, required_actions: list[str]) -> dict:
+def _executive_view(conclusion: str, required_actions: list[str],
+                     asset_health: dict = None) -> dict:
     """
-    Executive view — conclusion and required actions only.
-    No data, no timestamps, no narration.
+    Executive view -- conclusion, required actions, asset health.
+    No raw data, no timestamps, no engineering detail.
     """
-    return {
+    result = {
         "conclusion": conclusion,
         "required_actions": required_actions,
     }
-
+    if asset_health:
+        result["asset_health"] = asset_health
+    return result
 
 def _operator_view(
     conclusion: str,

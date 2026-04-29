@@ -338,7 +338,7 @@ async def lifespan(app: FastAPI):
         config_path=CONFIG_PATH,
         publish_callback=_publish,
         db_persist=_db_persist,
-        state_callback=_broadcast,
+        state_callback=_schedule_broadcast,
     )
     log.info("Twin engine created")
 
@@ -420,11 +420,23 @@ def get_brief():
     state = _engine._state
     filter_status = _engine.get_filter_status()
 
+    # Get actual device and filter age from current state
+    device_age_minutes = getattr(state, "last_known_device_age", None) or state.last_known_filter_age
+    filter_age_minutes = state.last_known_filter_age
+
+    # Get filter life hours from device profile
+    try:
+        filter_life_hours = _engine._profile.consumables.get(
+            state.installed_filter_type or 'particle_only', {}
+        ).get('life_hours', 4380)
+    except Exception:
+        filter_life_hours = 4380
+
     return brief_generator.generate(
         state=state,
-        device_age_minutes=None,
-        filter_age_minutes=None,
-        filter_life_hours=4380,
+        device_age_minutes=device_age_minutes,
+        filter_age_minutes=filter_age_minutes,
+        filter_life_hours=filter_life_hours,
         recent_regime_history=_get_recent_regime_history(),
         open_alerts=_get_open_alerts(),
     )

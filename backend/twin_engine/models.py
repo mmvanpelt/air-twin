@@ -205,6 +205,7 @@ class TwinState:
     filter_change_device_age_anchor: Optional[int] = None  # minutes
     filter_change_pending_reset:     bool = False
     last_known_filter_age:           Optional[int] = None  # minutes
+    last_known_device_age:           Optional[int] = None  # minutes -- non-resettable Zigbee counter
     installed_filter_type:           FilterType = FilterType.PARTICLE_ONLY
     last_logged_filter_type:         Optional[FilterType] = None
 
@@ -307,6 +308,7 @@ class TwinState:
             "filter_change_device_age_anchor": self.filter_change_device_age_anchor,
             "filter_change_pending_reset":     self.filter_change_pending_reset,
             "last_known_filter_age":           self.last_known_filter_age,
+            "last_known_device_age":           self.last_known_device_age,
             "installed_filter_type":           self.installed_filter_type.value,
             "last_logged_filter_type":         self.last_logged_filter_type.value
                                                if self.last_logged_filter_type else None,
@@ -394,6 +396,7 @@ class TwinState:
             filter_change_device_age_anchor=get("filter_change_device_age_anchor"),
             filter_change_pending_reset=get("filter_change_pending_reset", False),
             last_known_filter_age=get("last_known_filter_age"),
+            last_known_device_age=get("last_known_device_age"),
             installed_filter_type=installed_filter_type,
             last_logged_filter_type=last_logged_filter_type,
             # Performance
