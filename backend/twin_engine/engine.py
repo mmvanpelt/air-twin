@@ -543,7 +543,7 @@ class TwinEngine:
                         profile = get_device_profile(self._profile.device_id
                                                      if hasattr(self._profile, 'device_id')
                                                      else "ikea_starkvind_e2007",
-                                                     ROOT / "assets" / "device_profiles.json")
+                                                     Path(__file__).parent.parent.parent / "assets" / "device_profiles.json")
                         # Compare against expected — simplified check
                         ratios.append(cadr)
                 if ratios and max(ratios) < 50:  # very low empirical CADR
